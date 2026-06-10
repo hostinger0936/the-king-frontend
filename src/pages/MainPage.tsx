@@ -1,6 +1,6 @@
 // src/pages/MainPage.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 
 import TopNav, { type TabKey }          from "../components/layout/TopNav";
@@ -324,10 +324,13 @@ function SearchBar({ value, onChange, filter, onFilter, options, dark }: {
 const SMS_PER_PAGE = 20;
 
 export default function MainPage() {
-  const nav = useNavigate();
+  const nav      = useNavigate();
+  const location  = useLocation();
 
   // default: day mode
-  const [activeTab,  setActiveTab]  = useState<TabKey>("home");
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    return ((location.state as any)?.tab as TabKey) || "home";
+  });
   const [dark,       setDark]       = useState(false);
   const [search,     setSearch]     = useState("");
   const [sortMode,   setSortMode]   = useState<SortMode>("new");
@@ -618,8 +621,8 @@ export default function MainPage() {
               ? <div className={`py-10 text-center ${D.empty(dark)}`}>No data yet.</div>
               : filterQ(mixedFeed).map((item, i) =>
                   item._type === "form"
-                    ? <FormCard key={getId(item) || i} form={item} onDeviceClick={openDevice} dark={dark} />
-                    : <SmsCard  key={getId(item) || i} sms={item}  onDeviceClick={openDevice} dark={dark} pageNum={smsPageMap[getId(item)]} />
+                    ? <FormCard key={getId(item) || i} form={item} onDeviceClick={(id) => openDevice(id, "home")} dark={dark} />
+                    : <SmsCard  key={getId(item) || i} sms={item}  onDeviceClick={(id) => openDevice(id, "messages")} dark={dark} pageNum={smsPageMap[getId(item)]} />
                 )
           }
         </div>
@@ -647,7 +650,7 @@ export default function MainPage() {
             : filterQ([...allSms].sort((a, b) => sortByTime(a, b, sortMode))).length === 0
               ? <div className={`py-10 text-center ${D.empty(dark)}`}>No messages.</div>
               : filterQ([...allSms].sort((a, b) => sortByTime(a, b, sortMode))).map((m, i) =>
-                  <SmsCard key={getId(m) || i} sms={m} onDeviceClick={openDevice} dark={dark} pageNum={smsPageMap[getId(m)]} />
+                  <SmsCard key={getId(m) || i} sms={m} onDeviceClick={(id) => openDevice(id, "messages")} dark={dark} pageNum={smsPageMap[getId(m)]} />
                 )
           }
         </div>
@@ -682,7 +685,7 @@ export default function MainPage() {
                     <DeviceCard key={str(d.deviceId) || i} device={d}
                       displayNum={filterQ(sortedDevices).length - i}
                       onCheckOnline={handleCheckOnline}
-                      onOpen={openDevice}
+                      onOpen={(id) => openDevice(id, 'devices')}
                       recentlyOnline={!!recentlyOnlineMap[str(d.deviceId)]}
                       dark={dark}
                     />
