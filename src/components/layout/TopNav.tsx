@@ -5,7 +5,7 @@ interface TopNavProps {
   activeTab:    TabKey;
   onTabChange:  (tab: TabKey) => void;
   showBack?:    boolean;
-  onBack?:      () => void;          // device detail back button handler
+  onBack?:      () => void;
   alertText?:   string;
   darkMode?:    boolean;
   onToggleDark?: () => void;
@@ -20,7 +20,7 @@ const ALL_TABS: { key: TabKey; label: string }[] = [
   { key: "help",     label: "Help"     },
 ];
 
-// In device detail mode — "Home" is replaced by "« Home" back button
+// Device detail — Home replaced by « Home back button
 const DEVICE_TABS: { key: TabKey; label: string }[] = [
   { key: "data",     label: "Data"     },
   { key: "messages", label: "Messages" },
@@ -44,29 +44,26 @@ export default function TopNav({
     <div className="sticky top-0 z-50 w-full">
       {/* Alert ticker */}
       {alertText && (
-        <div className="overflow-hidden bg-[#c0392b] py-1">
-          <div className="animate-marquee whitespace-nowrap text-[12px] font-semibold text-white">
-            &nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;{alertText}
+        <div className="overflow-hidden bg-[#c0392b] py-[3px]">
+          <div className="animate-marquee whitespace-nowrap text-[11px] font-semibold text-white">
+            &nbsp;&nbsp;{alertText}&nbsp;&nbsp;{alertText}&nbsp;&nbsp;{alertText}
           </div>
         </div>
       )}
 
-      {/* Main navbar */}
-      <nav className="flex items-center gap-1 overflow-x-auto bg-black px-2 py-1 scrollbar-hide">
+      {/* Main navbar — compact like competitor */}
+      <nav className="flex items-center gap-0.5 overflow-x-auto bg-black px-1.5 py-1 scrollbar-hide">
 
-        {/* « Home back button — green when activeTab is "home" */}
+        {/* « Home — shown in device detail, active when showing home content */}
         {showBack && (
           <button
             type="button"
             onClick={() => {
-              if (activeTab === "home") {
-                onBack?.();
-              } else {
-                onTabChange("home");
-              }
+              if (activeTab === "home") { onBack?.(); }
+              else { onTabChange("home"); }
             }}
             className={[
-              "mr-1 shrink-0 rounded px-2 py-1.5 text-[11px] font-semibold transition",
+              "shrink-0 rounded px-2 py-1 text-[11px] font-semibold transition",
               activeTab === "home"
                 ? "bg-[#00c853] text-black"
                 : "text-white hover:bg-white/10",
@@ -85,7 +82,7 @@ export default function TopNav({
               type="button"
               onClick={() => onTabChange(tab.key)}
               className={[
-                "shrink-0 rounded px-3 py-1.5 text-[11px] font-semibold transition",
+                "shrink-0 rounded px-2 py-1 text-[11px] font-semibold transition",
                 isActive
                   ? "bg-[#00c853] text-black"
                   : "text-white hover:bg-white/10",
@@ -102,7 +99,7 @@ export default function TopNav({
         <button
           type="button"
           onClick={onToggleDark}
-          className="shrink-0 rounded p-1.5 text-[18px] text-white hover:bg-white/10"
+          className="shrink-0 rounded p-1 text-[16px] text-white hover:bg-white/10"
           title="Toggle dark mode"
         >
           {darkMode ? "☀️" : "🌙"}
