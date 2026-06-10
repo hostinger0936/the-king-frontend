@@ -1,4 +1,4 @@
-// src/components/layout/TopNav.tsx 
+// src/components/layout/TopNav.tsx
 import { useNavigate } from "react-router-dom";
 
 export type TabKey = "home" | "data" | "messages" | "groups" | "devices" | "help";
@@ -49,7 +49,7 @@ export default function TopNav({
           <button
             type="button"
             onClick={() => nav("/")}
-            className="mr-2 shrink-0 rounded px-2 py-1.5 text-[13px] font-semibold text-[#00c853] hover:bg-white/10"
+            className="mr-2 shrink-0 rounded px-2 py-1.5 text-[11px] font-semibold text-[#00c853] hover:bg-white/10"
           >
             « Home
           </button>
@@ -64,7 +64,7 @@ export default function TopNav({
               type="button"
               onClick={() => onTabChange(tab.key)}
               className={[
-                "shrink-0 rounded px-3 py-1.5 text-[13px] font-semibold transition",
+                "shrink-0 rounded px-3 py-1.5 text-[11px] font-semibold transition",
                 isActive
                   ? "bg-[#00c853] text-black"
                   : "text-white hover:bg-white/10",
