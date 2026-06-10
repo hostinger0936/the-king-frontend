@@ -257,6 +257,14 @@ function DeviceCard({ device, displayNum, onCheckOnline, onOpen, recentlyOnline,
   const android = str(device.metadata?.androidVersion || "");
   const sim     = device.simInfo;
   const lastAt  = pickLastSeenAt(device);
+
+  // Live tick — isRecent recomputes every second so color updates without refresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const isRecent = recentlyOnline || (lastAt > 0 && (Date.now() - lastAt) < 60 * 1000);
 
   const rows: { text: React.ReactNode }[] = [
