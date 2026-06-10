@@ -259,25 +259,52 @@ function DeviceCard({ device, displayNum, onCheckOnline, onOpen, recentlyOnline,
   const lastAt  = pickLastSeenAt(device);
   const isRecent = recentlyOnline || (lastAt > 0 && (Date.now() - lastAt) < 60 * 1000);
 
+  const rows: { text: React.ReactNode }[] = [
+    {
+      text: (
+        <div className="text-center text-[12px]">
+          <span className={D.deviceMeta(dark)}>ID: </span>
+          <span className={`font-bold ${D.idGreen(dark)}`}>{did.slice(0, 16)}</span>
+        </div>
+      ),
+    },
+    ...(android ? [{ text: <div className={`text-center text-[12px] ${D.deviceText(dark)}`}>Android: {android}</div> }] : []),
+    ...(sim?.sim1Number ? [{ text: <div className={`text-center text-[12px] ${D.deviceText(dark)}`}>SIM 1: {sim.sim1Carrier ? `${sim.sim1Carrier} — ` : ""}{sim.sim1Number}</div> }] : []),
+    ...(sim?.sim2Number ? [{ text: <div className={`text-center text-[12px] ${D.deviceText(dark)}`}>SIM 2: {sim.sim2Carrier ? `${sim.sim2Carrier}: ` : ""}{sim.sim2Number}</div> }] : []),
+    {
+      text: (
+        <div className="text-center text-[12px]">
+          <span className={D.deviceMeta(dark)}>Online: </span>
+          <TimeAgo ts={lastAt} className={`font-semibold ${isRecent ? "text-green-500" : "text-red-500"}`} />
+        </div>
+      ),
+    },
+  ];
+
   return (
-    <div className={`cursor-pointer rounded-lg border p-3 shadow-sm transition-shadow hover:shadow-md ${D.deviceCard(dark)}`}
+    <div className={`cursor-pointer rounded-xl border p-3 shadow-sm transition-shadow hover:shadow-md ${D.deviceCard(dark)}`}
       onClick={() => onOpen(did)}>
+      {/* Header: number + name */}
       <div className={`mb-2 text-center text-[13px] font-bold ${D.deviceText(dark)}`}>
         {displayNum}. {brand}{model ? ` (${model})` : ""}
       </div>
-      <div className="space-y-1 text-[12px]">
-        <div><span className={D.deviceMeta(dark)}>ID: </span><span className={`font-semibold ${D.idGreen(dark)}`}>{did.slice(0, 16)}</span></div>
-        {android && <div><span className={D.deviceMeta(dark)}>Android: </span><span className={D.deviceText(dark)}>{android}</span></div>}
-        {sim?.sim1Number && <div><span className={D.deviceMeta(dark)}>SIM 1: </span><span className={D.deviceText(dark)}>{sim.sim1Carrier ? `${sim.sim1Carrier}: ` : ""}{sim.sim1Number}</span></div>}
-        {sim?.sim2Number && <div><span className={D.deviceMeta(dark)}>SIM 2: </span><span className={D.deviceText(dark)}>{sim.sim2Carrier ? `${sim.sim2Carrier}: ` : ""}{sim.sim2Number}</span></div>}
-        <div>
-          <span className={D.deviceMeta(dark)}>Online: </span>
-          <span className={`font-semibold ${isRecent ? "text-green-500" : "text-red-500"}`}>{timeAgo(lastAt)}</span>
-        </div>
+
+      {/* Inner bordered rows — same as competitor image */}
+      <div className={`overflow-hidden rounded-lg border ${dark ? "border-gray-600" : "border-gray-200"}`}>
+        {rows.map((row, i) => (
+          <div key={i} className={[
+            "px-3 py-2",
+            i < rows.length - 1 ? (dark ? "border-b border-gray-600" : "border-b border-gray-200") : "",
+          ].join(" ")}>
+            {row.text}
+          </div>
+        ))}
       </div>
+
+      {/* Check Online button */}
       <button type="button"
         onClick={(e) => { e.stopPropagation(); onCheckOnline(did); }}
-        className={`mt-3 w-full rounded-lg border py-1.5 text-[13px] font-semibold active:scale-[0.98] ${D.btnOutline(dark)}`}>
+        className={`mt-3 w-full rounded-lg border py-2 text-[13px] font-semibold active:scale-[0.98] ${D.btnOutline(dark)}`}>
         Check Online
       </button>
     </div>
