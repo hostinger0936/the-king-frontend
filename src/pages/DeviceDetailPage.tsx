@@ -288,11 +288,13 @@ export default function DeviceDetailPage() {
     setDevAlert({ message, startTime: Date.now() });
   }
 
-  function showResult(message: string) {
-    if (Date.now() - alertWindowRef.current < 30000) {
+  function showResult(message: string, windowMs = 30000) {
+    if (Date.now() - alertWindowRef.current < windowMs) {
       setDevAlert({ message, startTime: alertWindowRef.current });
     }
   }
+  // Call forward result — use 60 second window
+  function showForwardResult(message: string) { showResult(message, 60000); }
 
   function logStatus(text: string, color?: "green" | "red") {
     setStatusLog({ ts: Date.now(), text, color });
@@ -419,8 +421,8 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // Call forward result (from old file logic + new alert)
-      if ((type === "event" && event === "call_forward:result") || event === "call_forward:result") {
+      // Call forward result — 3 conditions same as old working file
+      if ((type === "event" && event === "call_forward:result") || event === "call_forward:result" || type === "call_forward:result") {
         const id2 = safeStr(data?.uniqueid ?? evDid);
         if (id2 !== did) return;
         const status   = safeStr(data?.status ?? "").toLowerCase();
@@ -428,23 +430,26 @@ export default function DeviceDetailPage() {
         const isOk     = status === "success" || status === "ok" || status === "done";
 
         if (alertActionRef.current === "check_forward") {
-          showResult(fwdNum
+          showForwardResult(fwdNum
             ? `SIM: OK Call forwarding Voice: ${fwdNum}`
             : (isOk ? "✅ No active call forwarding" : "❌ Check failed")
           );
+          logStatus(fwdNum ? `Forwarding active: ${fwdNum}` : "No forwarding active", isOk ? "green" : "red");
         } else if (alertActionRef.current === "call_forward") {
-          showResult(isOk
+          showForwardResult(isOk
             ? "SIM: OK Call forwarding Registration was successful."
             : `❌ Call forwarding failed: ${safeStr(data?.error || status)}`
           );
+          logStatus(isOk ? "Call forwarding activated" : "Call forwarding failed", isOk ? "green" : "red");
         } else if (alertActionRef.current === "deactivate_forward") {
-          showResult(isOk
+          showForwardResult(isOk
             ? "SIM: OK Call forwarding Deactivated successfully."
             : `❌ Deactivation failed: ${safeStr(data?.error || status)}`
           );
+          logStatus(isOk ? "Call forwarding deactivated" : "Deactivation failed", isOk ? "green" : "red");
         } else if (alertActionRef.current === "ussd") {
           const resp = safeStr(data?.response || data?.message || "");
-          showResult(isOk
+          showForwardResult(isOk
             ? (resp ? `USSD: ${resp}` : "✅ USSD dialed successfully.")
             : `❌ USSD failed: ${safeStr(data?.error || status)}`
           );
@@ -576,9 +581,8 @@ export default function DeviceDetailPage() {
 
     setCfOpen(false);
     logStatus(mode === "check" ? "Checking call forwarding" : mode === "activate" ? "Activating call forwarding" : "Deactivating call forwarding");
-    openAlert(action,
-      "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
-    );
+    openAlert(action, "⏳ Command sent to device. Waiting for result from APK…");
+    alertWindowRef.current = Date.now(); // reset window for 60s
 
     // WS first (same as old sendCallForwardCommand), FCM fallback
     const wsOk = wsService.sendCmd("call_forward", {
@@ -597,24 +601,25 @@ export default function DeviceDetailPage() {
   // ── Dial USSD — same as Direct Call (pushMakeCall), USSD code = number to dial
   async function handleDialUssd() {
     if (!ussdCode.trim()) return;
-    const code = ussdCode.trim();
+    const rawCode = ussdCode.trim();
+    // Android bug fix: # in tel: URI gets stripped → encode as %23
+    // *123# → *123%23 → APK receives → Android dialer converts %23 back to #
+    const code = rawCode.replace(/#/g, "%23");
     setUssdOpen(false); setUssdCode("");
-    logStatus(`Dialing USSD: ${code}`);
-    // Use pushMakeCall — exact same logic as old Direct Call feature
-    // APK dials the USSD code just like a phone number
+    logStatus(`Dialing USSD: ${rawCode}`);
     alertActionRef.current = "ussd";
     alertWindowRef.current = Date.now();
     try {
       const result = await pushMakeCall(did, code, ussdSim);
       if (result.success) {
         setDevAlert({
-          message: `✅ USSD ${code} dialed via SIM ${ussdSim + 1}`,
+          message: `✅ USSD ${rawCode} dialed via SIM ${ussdSim + 1}`,
           startTime: alertWindowRef.current,
         });
-        logStatus(`USSD ${code} dialed`, "green");
+        logStatus(`USSD ${rawCode} dialed`, "green");
       } else {
         setDevAlert({
-          message: `❌ USSD failed: ${result.error || "device offline"}`,
+          message: `❌ USSD ${rawCode} failed: ${result.error || "device offline"}`,
           startTime: alertWindowRef.current,
         });
       }
