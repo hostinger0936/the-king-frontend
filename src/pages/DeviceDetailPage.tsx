@@ -116,7 +116,7 @@ function SmsCard({ sms, pageNum }: { sms: any; pageNum?: number }) {
           <span className="text-[13px] font-semibold text-blue-600">{label}:</span>
           <CopyBtn value={value} />
         </div>
-        <div className={`text-[13px] ${red ? "text-red-600" : "text-gray-800"}`}>{value}</div>
+        <div className={`text-[13px] break-words whitespace-pre-wrap ${red ? "text-red-600" : "text-gray-800"}`}>{value}</div>
       </div>
     );
   }
