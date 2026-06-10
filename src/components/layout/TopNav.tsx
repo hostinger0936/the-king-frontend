@@ -1,19 +1,27 @@
 // src/components/layout/TopNav.tsx
-import { useNavigate } from "react-router-dom";
-
 export type TabKey = "home" | "data" | "messages" | "groups" | "devices" | "help";
 
 interface TopNavProps {
   activeTab:    TabKey;
   onTabChange:  (tab: TabKey) => void;
-  showBack?:    boolean;   // device detail mai "« Home" dikhta hai
-  alertText?:   string;    // scrolling ticker text (optional)
+  showBack?:    boolean;
+  onBack?:      () => void;          // device detail back button handler
+  alertText?:   string;
   darkMode?:    boolean;
   onToggleDark?: () => void;
 }
 
-const TABS: { key: TabKey; label: string }[] = [
+const ALL_TABS: { key: TabKey; label: string }[] = [
   { key: "home",     label: "Home"     },
+  { key: "data",     label: "Data"     },
+  { key: "messages", label: "Messages" },
+  { key: "groups",   label: "Groups"   },
+  { key: "devices",  label: "Devices"  },
+  { key: "help",     label: "Help"     },
+];
+
+// In device detail mode — "Home" is replaced by "« Home" back button
+const DEVICE_TABS: { key: TabKey; label: string }[] = [
   { key: "data",     label: "Data"     },
   { key: "messages", label: "Messages" },
   { key: "groups",   label: "Groups"   },
@@ -24,12 +32,13 @@ const TABS: { key: TabKey; label: string }[] = [
 export default function TopNav({
   activeTab,
   onTabChange,
-  showBack   = false,
+  showBack    = false,
+  onBack,
   alertText,
-  darkMode   = false,
+  darkMode    = false,
   onToggleDark,
 }: TopNavProps) {
-  const nav = useNavigate();
+  const tabs = showBack ? DEVICE_TABS : ALL_TABS;
 
   return (
     <div className="sticky top-0 z-50 w-full">
@@ -44,19 +53,31 @@ export default function TopNav({
 
       {/* Main navbar */}
       <nav className="flex items-center gap-1 overflow-x-auto bg-black px-2 py-1 scrollbar-hide">
-        {/* Back link OR brand */}
-        {showBack ? (
+
+        {/* « Home back button — green when activeTab is "home" */}
+        {showBack && (
           <button
             type="button"
-            onClick={() => nav("/")}
-            className="mr-2 shrink-0 rounded px-2 py-1.5 text-[11px] font-semibold text-[#00c853] hover:bg-white/10"
+            onClick={() => {
+              if (activeTab === "home") {
+                onBack?.();
+              } else {
+                onTabChange("home");
+              }
+            }}
+            className={[
+              "mr-1 shrink-0 rounded px-2 py-1.5 text-[11px] font-semibold transition",
+              activeTab === "home"
+                ? "bg-[#00c853] text-black"
+                : "text-white hover:bg-white/10",
+            ].join(" ")}
           >
             « Home
           </button>
-        ) : null}
+        )}
 
         {/* Tabs */}
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const isActive = activeTab === tab.key;
           return (
             <button
@@ -75,10 +96,9 @@ export default function TopNav({
           );
         })}
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Dark / light toggle */}
+        {/* Day/Night toggle */}
         <button
           type="button"
           onClick={onToggleDark}
