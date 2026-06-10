@@ -353,6 +353,11 @@ export default function MainPage() {
   const checkDeviceIdRef  = useRef("");
   const checkStatusRef    = useRef<CheckStatus | null>(null);
   const checkTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track check window — alert close hone ke baad bhi 30 sec tak listen karo
+  const checkWindowRef    = useRef<number>(0);
+
+  // Alert ticker
+  const [alertText, setAlertText] = useState("");
 
   // ── Loaders ──────────────────────────────────────────────────────────────
   const loadDevices = useCallback(async () => {
@@ -411,6 +416,14 @@ export default function MainPage() {
     wsService.connect();
     loadAll();
 
+    // Fetch alert ticker text
+    import("../config/constants").then(({ ENV, apiHeaders: ah }) => {
+      fetch(`${ENV.API_BASE}/api/admin/alert-text`, { headers: ah() })
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d?.text) setAlertText(String(d.text)); })
+        .catch(() => {});
+    }).catch(() => {});
+
     const off = wsService.onMessage((msg) => {
       if (!msg || msg.type !== "event") return;
       const event    = String(msg.event || "");
@@ -461,10 +474,14 @@ export default function MainPage() {
         setDevices((prev) => prev.map((d) => str(d.deviceId) === did ? { ...d, lastSeen: { at: lastSeenAt, action, battery } } : d));
 
         // Check online response
-        if (checkDeviceIdRef.current === did && checkStatusRef.current === "checking") {
+        // checkStatusRef === null means alert was closed — but still in 30 sec window
+        const inWindow = checkDeviceIdRef.current === did &&
+          (checkStatusRef.current === "checking" || (checkStatusRef.current === null && Date.now() - checkWindowRef.current < 30000));
+
+        if (inWindow) {
           if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
           checkStatusRef.current = "online";
-          // Alert updates in place — user closes manually
+          // Show/re-show alert with online status
           setCheckAlert({ deviceId: did, status: "online" });
           // Green for 5 sec
           setRecentlyOnlineMap((prev) => ({ ...prev, [did]: Date.now() }));
@@ -477,7 +494,9 @@ export default function MainPage() {
 
       if (event === "device:uninstalled") {
         const did = String(msg.deviceId || msg?.data?.deviceId || "");
-        if (checkDeviceIdRef.current === did && checkStatusRef.current === "checking") {
+        const inWin = checkDeviceIdRef.current === did &&
+          (checkStatusRef.current === "checking" || (checkStatusRef.current === null && Date.now() - checkWindowRef.current < 30000));
+        if (inWin) {
           if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
           checkStatusRef.current = "uninstalled";
           setCheckAlert({ deviceId: did, status: "uninstalled" });
@@ -507,6 +526,7 @@ export default function MainPage() {
     if (!deviceId) return;
     checkDeviceIdRef.current  = deviceId;
     checkStatusRef.current    = "checking";
+    checkWindowRef.current    = Date.now();  // start 30 sec window
     setCheckAlert({ deviceId, status: "checking" });
 
     try {
@@ -527,8 +547,9 @@ export default function MainPage() {
 
   const closeCheckAlert = useCallback(() => {
     if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
-    checkStatusRef.current    = null;
-    checkDeviceIdRef.current  = "";
+    checkStatusRef.current = null;
+    // checkDeviceIdRef mat clear karo — 30 sec tak listen karte rahenge
+    // agar device online aaya toh naya alert dikhao
     setCheckAlert(null);
   }, []);
 
@@ -619,7 +640,7 @@ export default function MainPage() {
 
   return (
     <div className={["min-h-screen", bg].join(" ")}>
-      <TopNav activeTab={activeTab} onTabChange={handleTabChange} darkMode={darkMode} onToggleDark={() => setDarkMode((d) => !d)} />
+      <TopNav activeTab={activeTab} onTabChange={handleTabChange} darkMode={darkMode} onToggleDark={() => setDarkMode((d) => !d)} alertText={alertText} />
 
       {activeTab !== "devices" && activeTab !== "help" && (
         <SearchBar value={search} onChange={setSearch} filter={sortMode} onFilter={(v) => setSortMode(v as SortMode)} options={SORT_OPTS} />
@@ -639,13 +660,24 @@ export default function MainPage() {
       )}
 
       {/* DATA */}
-      {activeTab === "data" && (
-        <div className="space-y-3 px-3 pb-24 pt-1">
-          {loadingForms ? <div className="py-10 text-center text-gray-400">Loading…</div>
-          : filteredForms.length === 0 ? <div className="py-10 text-center text-gray-400">No form data.</div>
-          : filteredForms.map((f, i) => <FormCard key={getId(f) || i} form={f} onDeviceClick={openDevice} />)}
-        </div>
-      )}
+      {activeTab === "data" && (() => {
+        // Combine forms + card payments + netbanking sorted by time
+        const allCardItems = Object.values(cardMap).flat();
+        const allNetItems  = Object.values(netMap).flat();
+        const combined = [
+          ...filteredForms.map((f) => ({ ...f, _dtype: "form" })),
+          ...allCardItems.map((c) => ({ ...c, _dtype: "card" })),
+          ...allNetItems.map((n) => ({ ...n, _dtype: "net" })),
+        ].sort((a, b) => sortMode === "new" ? getTs(b) - getTs(a) : getTs(a) - getTs(b));
+        const filtered = q ? combined.filter((item) => JSON.stringify(item).toLowerCase().includes(q)) : combined;
+        return (
+          <div className="space-y-3 px-3 pb-24 pt-1">
+            {loadingForms || loadingGroups ? <div className="py-10 text-center text-gray-400">Loading…</div>
+            : filtered.length === 0 ? <div className="py-10 text-center text-gray-400">No data.</div>
+            : filtered.map((item, i) => <FormCard key={getId(item) || i} form={item} onDeviceClick={openDevice} />)}
+          </div>
+        );
+      })()}
 
       {/* MESSAGES */}
       {activeTab === "messages" && (
