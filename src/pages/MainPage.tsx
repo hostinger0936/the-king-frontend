@@ -47,6 +47,18 @@ function getTs(m: any): number {
 }
 
 // Sort newest first — items with no timestamp go to bottom
+// ─── Live TimeAgo (updates every second) ─────────────────────────────────────
+function TimeAgo({ ts, className = "" }: { ts: number; className?: string }) {
+  const [text, setText] = useState(() => timeAgo(ts));
+  useEffect(() => {
+    const update = () => setText(timeAgo(ts));
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [ts]);
+  return <span className={className}>{text}</span>;
+}
+
 function sortByTime(a: AnyRecord, b: AnyRecord, mode: SortMode = "new"): number {
   const ta = getTs(a), tb = getTs(b);
   if (ta === 0 && tb === 0) return 0;
