@@ -670,6 +670,59 @@ export default function MainPage() {
     return list.filter((item) => JSON.stringify(item).toLowerCase().includes(q));
   }
 
+  // ── Help helpers ──────────────────────────────────────────────────────────
+  function handleLogout() { setHelpOpen(false); logout(); }
+
+  function openWhatsApp() {
+    const t = String(ENV.WHATSAPP_TARGET || "");
+    if (!t) return;
+    window.open(t.startsWith("http") ? t : `https://wa.me/${t.replace(/\D/g,"")}`, "_blank", "noopener,noreferrer");
+  }
+
+  function openTelegramHelp() {
+    window.open(String(ENV.TELEGRAM_CHANNEL || "https://t.me/"), "_blank", "noopener,noreferrer");
+  }
+
+  async function loadGlobalPhone() {
+    try {
+      const r = await fetch(`${ENV.API_BASE}/api/admin/globalPhone`, { headers: apiHeaders() });
+      const d = await r.json();
+      const ph = String(d?.phone || "");
+      setGlobalPhone(ph);
+      setGlobalEnabled(!!ph);
+    } catch {}
+  }
+
+  async function saveGlobalPhone() {
+    setGlobalLoading(true); setGlobalMsg("");
+    try {
+      await axios.put(`${ENV.API_BASE}/api/admin/globalPhone`, { phone: globalEnabled ? globalPhone : "" }, { headers: apiHeaders() });
+      setGlobalMsg(globalEnabled ? "✅ Saved!" : "✅ Cleared!");
+      if (!globalEnabled) setGlobalPhone("");
+    } catch { setGlobalMsg("❌ Failed"); }
+    finally { setGlobalLoading(false); }
+  }
+
+  async function changePin() {
+    setPinMsg("");
+    if (!pinOld || !pinNew) { setPinMsg("❌ All fields required"); return; }
+    if (pinNew !== pinConfirm) { setPinMsg("❌ PINs don't match"); return; }
+    if (pinNew.length < 4) { setPinMsg("❌ Min 4 digits"); return; }
+    try {
+      const r = await axios.post(`${ENV.API_BASE}/api/admin/deletePassword/change`,
+        { currentPassword: pinOld, newPassword: pinNew }, { headers: apiHeaders() });
+      if (r.data?.success) { setPinMsg("✅ PIN changed!"); setPinOld(""); setPinNew(""); setPinConfirm(""); }
+      else { setPinMsg("❌ " + (r.data?.error || "Failed")); }
+    } catch (e: any) { setPinMsg("❌ " + (e?.response?.data?.error || "Failed")); }
+  }
+
+  async function loadLicenseInfo() {
+    try {
+      const r = await fetch(`${ENV.API_BASE}/api/admin/license-info`, { headers: apiHeaders() });
+      if (r.ok) setLicenseInfo(await r.json());
+    } catch {}
+  }
+
   function handleTabChange(tab: TabKey) { if (tab === "help") { setHelpOpen(true); return; } setActiveTab(tab); setSearch(""); }
 
   const SORT_OPTS   = [{ value: "new", label: "NEW" }, { value: "old", label: "OLD" }];
