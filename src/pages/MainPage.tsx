@@ -396,6 +396,7 @@ export default function MainPage() {
 
   // APK Info state
   const [licenseInfo,  setLicenseInfo]  = useState<any>(null);
+  const [contactOpen,  setContactOpen]  = useState(false);
 
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     return ((location.state as any)?.tab as TabKey) || "home";
@@ -744,7 +745,10 @@ export default function MainPage() {
   }
 
   function openTelegramHelp() {
-    window.open(String(ENV.TELEGRAM_CHANNEL || "https://t.me/"), "_blank", "noopener,noreferrer");
+    const raw = String((import.meta.env.VITE_TELEGRAM_TARGET as string) || ENV.TELEGRAM_CHANNEL || "");
+    if (!raw) return;
+    const url = raw.startsWith("http") ? raw : `https://${raw}`;
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   async function loadGlobalPhone() {
@@ -922,13 +926,38 @@ export default function MainPage() {
 
             {/* Contact buttons */}
             <div className="space-y-2">
-              <button type="button" onClick={openWhatsApp}
+              <button type="button" onClick={() => setContactOpen(true)}
                 className="w-full rounded-xl border-2 border-green-500 py-3 text-[14px] font-semibold text-green-400">
                 Contact Us
               </button>
               <button type="button" onClick={openTelegramHelp}
                 className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-semibold text-blue-400">
                 Telegram Channel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Us popup */}
+      {contactOpen && (
+        <div className="fixed inset-0 z-[1001] flex items-end justify-center bg-black/40"
+          onClick={() => setContactOpen(false)}>
+          <div className="w-full rounded-t-2xl bg-white px-5 pt-5 pb-8"
+            onClick={e => e.stopPropagation()}>
+            <div className="mb-4 text-center text-[15px] font-extrabold text-gray-900">Contact Us</div>
+            <div className="space-y-3">
+              <button type="button" onClick={() => { setContactOpen(false); openWhatsApp(); }}
+                className="w-full rounded-xl border-2 border-green-500 py-3 text-[14px] font-extrabold text-green-600">
+                WhatsApp
+              </button>
+              <button type="button" onClick={() => { setContactOpen(false); openTelegramTarget(); }}
+                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-extrabold text-blue-600">
+                Telegram
+              </button>
+              <button type="button" onClick={() => { setContactOpen(false); openHarmfullContact(); }}
+                className="w-full rounded-xl border-2 border-amber-500 py-3 text-[14px] font-extrabold text-amber-600">
+                Contact Harmfull Team
               </button>
             </div>
           </div>
