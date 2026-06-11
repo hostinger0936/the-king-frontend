@@ -127,7 +127,9 @@ export default function LoginPage() {
   }
 
   function openTelegram() {
-    const url = safeStr(ENV.TELEGRAM_CHANNEL) || "https://t.me/";
+    const raw = safeStr((import.meta.env.VITE_TELEGRAM_TARGET as string) || ENV.TELEGRAM_CHANNEL || "");
+    if (!raw) return;
+    const url = raw.startsWith("http") ? raw : `https://${raw}`;
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
