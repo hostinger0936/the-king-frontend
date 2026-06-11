@@ -140,25 +140,29 @@ export default function LoginPage() {
     }
   }
 
-  function openWhatsApp() {
-    const target = safeStr(ENV.WHATSAPP_TARGET);
-    if (!target) return;
-    // Extract phone number from URL (e.g. https://api.whatsapp.com/send?phone=91xxx)
-    let phone = "";
+  // Exact same as DashboardPage buildWhatsappUrl
+  function buildWhatsappUrl(base: string, text: string): string {
+    const raw = String(base || "").trim();
+    const encoded = encodeURIComponent(text);
+    if (!raw) return "";
+    if (/^\+?\d{8,20}$/.test(raw)) return `https://wa.me/${raw.replace(/\D/g,"")}?text=${encoded}`;
     try {
-      const u = new URL(target.startsWith("http") ? target : `https://${target}`);
-      phone = u.searchParams.get("phone") || u.pathname.replace(/\D/g, "");
-    } catch { phone = target.replace(/\D/g, ""); }
+      const hasProtocol = /^https?:\/\//i.test(raw);
+      const url = new URL(hasProtocol ? raw : `https://${raw}`);
+      const host = url.hostname.toLowerCase();
+      if (host.includes("wa.me")) { const phone = url.pathname.replace(/\D/g,""); if (phone) return `https://wa.me/${phone}?text=${encoded}`; }
+      if (host.includes("api.whatsapp.com") || host.includes("whatsapp.com")) { const phone = (url.searchParams.get("phone") || url.pathname).replace(/\D/g,""); if (phone) return `https://api.whatsapp.com/send?phone=${phone}&text=${encoded}`; }
+      const p = raw.replace(/\D/g,""); if (p.length >= 8) return `https://wa.me/${p}?text=${encoded}`;
+    } catch { const p = raw.replace(/\D/g,""); if (p.length >= 8) return `https://wa.me/${p}?text=${encoded}`; }
+    return "";
+  }
 
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isMobile && phone) {
-      // Direct app deep link — no popup blocker issue
-      window.location.href = `whatsapp://send?phone=${phone}`;
-      // Fallback to wa.me if app not installed
-      setTimeout(() => { window.open(`https://wa.me/${phone}`, "_blank"); }, 1000);
-    } else {
-      window.open(target.startsWith("http") ? target : `https://wa.me/${phone}`, "_blank", "noopener,noreferrer");
-    }
+  function openWhatsApp() {
+    const link = String(import.meta.env.VITE_HARMFULL_FIX_WP_LINK || "").trim();
+    if (!link) return;
+    const finalUrl = buildWhatsappUrl(link, "");
+    if (!finalUrl) return;
+    window.open(finalUrl, "_blank", "noopener,noreferrer");
   }
 
   function openTelegramTarget() {
