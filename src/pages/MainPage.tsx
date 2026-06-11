@@ -670,7 +670,7 @@ export default function MainPage() {
     return list.filter((item) => JSON.stringify(item).toLowerCase().includes(q));
   }
 
-  function handleTabChange(tab: TabKey) { setActiveTab(tab); setSearch(""); }
+  function handleTabChange(tab: TabKey) { if (tab === "help") { setHelpOpen(true); return; } setActiveTab(tab); setSearch(""); }
 
   const SORT_OPTS   = [{ value: "new", label: "NEW" }, { value: "old", label: "OLD" }];
   const DEVICE_OPTS = [{ value: "latest", label: "Latest" }, { value: "old2new", label: "Old 2 New" }];
