@@ -552,15 +552,27 @@ export default function MainPage() {
 
       // check_online:result — SIRF YE lastSeen display update karega
       if (event === "check_online:result") {
-        const did = String(msg.deviceId || msg?.data?.deviceId || "");
-        const ts  = Number(msg?.data?.checkedAt || Date.now());
-        if (msg?.data?.status === "online" && did) {
-          setDevices((p) => p.map((d) => str(d.deviceId) === did
-            ? { ...d, checkedAt: ts }
-            : d
-          ));
+        const did    = String(msg.deviceId || msg?.data?.deviceId || "");
+        const ts     = Number(msg?.data?.checkedAt || Date.now());
+        const status = String(msg?.data?.status || "");
+        const err    = String(msg?.data?.error  || "");
+        const inW    = checkDeviceIdRef.current === did && checkStatusRef.current === "checking";
+
+        if (status === "online" && did) {
+          // checkedAt update
+          setDevices((p) => p.map((d) => str(d.deviceId) === did ? { ...d, checkedAt: ts } : d));
           setRecentlyOnlineMap((p) => ({ ...p, [did]: ts }));
           setTimeout(() => setRecentlyOnlineMap((p) => { const c = { ...p }; delete c[did]; return c; }), 5000);
+          // Alert resolve
+          if (inW) {
+            if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
+            checkStatusRef.current = "online";
+            setCheckAlert({ deviceId: did, status: "online" });
+          }
+        } else if (err && err !== "missing_token" && inW) {
+          if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
+          checkStatusRef.current = null;
+          setCheckAlert({ deviceId: did, status: "checking" }); // keep checking state, error shown in DeviceDetail
         }
         return;
       }
@@ -598,9 +610,17 @@ export default function MainPage() {
     checkStatusRef.current   = "checking";
     checkWindowRef.current   = Date.now();
     setCheckAlert({ deviceId, status: "checking" });
+    // 30 sec timeout — agar APK respond na kare
+    if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
+    checkTimerRef.current = setTimeout(() => {
+      if (checkDeviceIdRef.current === deviceId && checkStatusRef.current === "checking") {
+        checkStatusRef.current = null;
+        setCheckAlert({ deviceId, status: "checking" }); // stays checking = unreachable
+      }
+    }, 30000);
     try {
-      try { await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(deviceId)}/ping`, { source: "main" }, { headers: apiHeaders(), timeout: 10000 }); }
-      catch { await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(deviceId)}/start`, { source: "main", force: true }, { headers: apiHeaders(), timeout: 10000 }); }
+      await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(deviceId)}/ping`,
+        { source: "main" }, { headers: apiHeaders(), timeout: 10000 });
     } catch {}
   }, []);
 
@@ -674,8 +694,9 @@ export default function MainPage() {
 
   // Devices
   const sortedDevices = useMemo(() => {
+    const getCheckedAt = (d: any) => Number(d?.checkedAt || 0);
     return [...devices].sort((a, b) =>
-      deviceSort === "latest" ? pickLastSeenAt(b) - pickLastSeenAt(a) : pickLastSeenAt(a) - pickLastSeenAt(b)
+      deviceSort === "latest" ? getCheckedAt(b) - getCheckedAt(a) : getCheckedAt(a) - getCheckedAt(b)
     );
   }, [devices, deviceSort]);
 
