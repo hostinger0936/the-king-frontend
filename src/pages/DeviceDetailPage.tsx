@@ -422,11 +422,27 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // App uninstalled
+      // App uninstalled (FCM token invalid — takes 24-72h from Google)
       if (event === "device:uninstalled" && evDid === did) {
         if (alertActionRef.current === "check_online") {
           showResult("App Uninstalled! ⚠️");
           logStatus("App Uninstalled!", "red");
+        }
+        return;
+      }
+
+      // Check online result — FCM immediately failed
+      if (event === "check_online:result" && evDid === did) {
+        if (alertActionRef.current === "check_online") {
+          const err = safeStr(data?.error || "");
+          if (err === "missing_token") {
+            // missing_token = naya device (token sync pending) ya uninstalled
+            showResult("⚠️ Device offline — FCM token not synced yet. Try again in a few seconds.");
+            logStatus("No FCM token", "red");
+          } else {
+            showResult("❌ Device Unreachable: " + err);
+            logStatus("Device Unreachable", "red");
+          }
         }
         return;
       }
@@ -548,19 +564,26 @@ export default function DeviceDetailPage() {
   async function handleCheckOnline() {
     logStatus("Checking device online");
     openAlert("check_online",
-      "We've forwarded your request to the phone. Wait up to 30 seconds for confirmation; if no reply appears, the device is currently offline."
+      "⏳ Request sent to device. Waiting for response (up to 30 seconds)…"
     );
     try {
       await axios.post(
         `${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/revive`,
         { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 }
-      ).catch(() =>
-        axios.post(
-          `${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/start`,
-          { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 }
-        )
       );
-    } catch {}
+      // FCM sent successfully — now wait for WS response from APK
+    } catch (err: any) {
+      // FCM failed immediately — API returned 400 or network error
+      const apiErr = safeStr(err?.response?.data?.error || "");
+      if (apiErr === "missing_token") {
+        showResult("⚠️ Device offline — FCM token not synced yet. Try again in a few seconds.");
+        logStatus("No FCM token", "red");
+      } else if (apiErr) {
+        showResult(`❌ FCM Failed: ${apiErr}`);
+        logStatus("FCM send failed", "red");
+      }
+      // If no apiErr, WS event will come via check_online:result
+    }
   }
 
   // ── GET SMS (from old file logic + new alert) ─────────────────────────────
