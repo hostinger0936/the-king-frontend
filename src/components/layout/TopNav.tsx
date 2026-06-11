@@ -42,16 +42,27 @@ export default function TopNav({
 
   return (
     <div className="sticky top-0 z-50 w-full">
-      {/* Alert ticker — duration scales with text length so it always completes */}
+      {/* Alert ticker — custom keyframe, duration scales with text length */}
       {alertText && (
-        <div className="overflow-hidden bg-[#c0392b] py-[3px]">
-          <div
-            className="animate-marquee whitespace-nowrap text-[11px] font-semibold text-white"
-            style={{ animationDuration: `${Math.max(20, Math.ceil(alertText.length * 0.12))}s` }}
-          >
-            &nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{alertText}
+        <>
+          <style>{`
+            @keyframes ticker-scroll {
+              0%   { transform: translateX(0); }
+              100% { transform: translateX(-50%); }
+            }
+          `}</style>
+          <div className="overflow-hidden bg-[#c0392b] py-[3px]">
+            <div
+              className="whitespace-nowrap text-[11px] font-semibold text-white"
+              style={{
+                display: "inline-block",
+                animation: `ticker-scroll ${Math.max(20, Math.ceil(alertText.length * 0.14))}s linear infinite`,
+              }}
+            >
+              &nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{alertText}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Main navbar — compact like competitor */}
