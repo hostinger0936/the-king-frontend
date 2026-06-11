@@ -144,14 +144,14 @@ export default function LoginPage() {
     const target = safeStr(ENV.WHATSAPP_TARGET);
     if (!target) return;
     const url = target.startsWith("http") ? target : `https://wa.me/${target.replace(/\D/g, "")}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.location.href = url;
   }
 
   function openTelegramTarget() {
     const raw = safeStr((import.meta.env.VITE_TELEGRAM_TARGET as string) || "");
     if (!raw) return;
     const url = raw.startsWith("http") ? raw : `https://${raw}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.location.href = url;
   }
 
   function openTelegram() {
