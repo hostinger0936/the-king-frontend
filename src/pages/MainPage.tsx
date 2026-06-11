@@ -267,7 +267,7 @@ function DeviceCard({ device, displayNum, onCheckOnline, onOpen, recentlyOnline,
     return () => clearInterval(t);
   }, []);
 
-  const isRecent = recentlyOnline || (checkedAt > 0 && (Date.now() - checkedAt) < 5 * 60 * 1000);
+  const isRecent = recentlyOnline || (checkedAt > 0 && (Date.now() - checkedAt) < 50 * 1000);
 
   const rows: { text: React.ReactNode }[] = [
     {
