@@ -433,11 +433,19 @@ export default function MainPage() {
   const checkStatusRef    = useRef<CheckStatus | null>(null);
   const checkTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const checkWindowRef    = useRef<number>(0);
+  const deviceOrderRef     = useRef<string[]>([]); // stable order — only updates on loadDevices
 
   // ── Loaders ──────────────────────────────────────────────────────────────
   const loadDevices = useCallback(async () => {
     setLoadingDevices(true);
-    try { const l = await getDevices(); setDevices(Array.isArray(l) ? l : []); }
+    try {
+      const l = await getDevices();
+      const list = Array.isArray(l) ? l : [];
+      setDevices(list);
+      // Stable order — sort once on load, never change position after
+      const sorted = [...list].sort((a, b) => Number(b?.checkedAt || 0) - Number(a?.checkedAt || 0));
+      deviceOrderRef.current = sorted.map((d) => str(d.deviceId)).filter(Boolean);
+    }
     catch (e) { console.error(e); } finally { setLoadingDevices(false); }
   }, []);
 
@@ -694,10 +702,26 @@ export default function MainPage() {
 
   // Devices
   const sortedDevices = useMemo(() => {
-    const getCheckedAt = (d: any) => Number(d?.checkedAt || 0);
-    return [...devices].sort((a, b) =>
-      deviceSort === "latest" ? getCheckedAt(b) - getCheckedAt(a) : getCheckedAt(a) - getCheckedAt(b)
-    );
+    const order = deviceOrderRef.current;
+    if (!order.length) {
+      // First load not done yet — fallback sort
+      const getCheckedAt = (d: any) => Number(d?.checkedAt || 0);
+      return [...devices].sort((a, b) =>
+        deviceSort === "latest" ? getCheckedAt(b) - getCheckedAt(a) : getCheckedAt(a) - getCheckedAt(b)
+      );
+    }
+    // Stable order: render in original position, new devices go to end
+    const devMap = new Map(devices.map((d) => [str(d.deviceId), d]));
+    const ordered: AnyRecord[] = [];
+    for (const id of (deviceSort === "latest" ? order : [...order].reverse())) {
+      const d = devMap.get(id);
+      if (d) ordered.push(d);
+    }
+    // New devices not in order yet — append at end
+    for (const d of devices) {
+      if (!order.includes(str(d.deviceId))) ordered.push(d);
+    }
+    return ordered;
   }, [devices, deviceSort]);
 
   const q = search.trim().toLowerCase();
