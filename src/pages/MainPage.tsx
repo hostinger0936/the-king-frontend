@@ -738,17 +738,47 @@ export default function MainPage() {
   // ── Help helpers ──────────────────────────────────────────────────────────
   function handleLogout() { setHelpOpen(false); logout(); }
 
+  function _openLink(url: string) {
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
   function openWhatsApp() {
-    const t = String(ENV.WHATSAPP_TARGET || "");
-    if (!t) return;
-    window.open(t.startsWith("http") ? t : `https://wa.me/${t.replace(/\D/g,"")}`, "_blank", "noopener,noreferrer");
+    const link = String(import.meta.env.VITE_HARMFULL_FIX_WP_LINK || "").trim();
+    if (!link) return;
+    let url = "";
+    try {
+      const u = new URL(/^https?:\/\//i.test(link) ? link : `https://${link}`);
+      const h = u.hostname.toLowerCase();
+      if (h.includes("wa.me")) url = `https://wa.me/${u.pathname.replace(/\D/g,"")}`;
+      else if (h.includes("whatsapp.com")) url = `https://api.whatsapp.com/send?phone=${(u.searchParams.get("phone")||u.pathname).replace(/\D/g,"")}`;
+    } catch { url = `https://wa.me/${link.replace(/\D/g,"")}`; }
+    if (url) _openLink(url);
+  }
+
+  function openHarmfullContact() {
+    const link = String(import.meta.env.VITE_HARMFULL_FIX_WP_LINK || "").trim();
+    if (!link) return;
+    const msg = encodeURIComponent(`Hello Sir Please Remove My Harmfull Problem My Panel Id is ${String(ENV.PANEL_ID||"").trim()}`);
+    let url = "";
+    try {
+      const u = new URL(/^https?:\/\//i.test(link) ? link : `https://${link}`);
+      const h = u.hostname.toLowerCase();
+      if (h.includes("wa.me")) url = `https://wa.me/${u.pathname.replace(/\D/g,"")}?text=${msg}`;
+      else if (h.includes("whatsapp.com")) url = `https://api.whatsapp.com/send?phone=${(u.searchParams.get("phone")||u.pathname).replace(/\D/g,"")}&text=${msg}`;
+    } catch {}
+    if (url) _openLink(url);
+  }
+
+  function openTelegramTarget() {
+    const raw = String((import.meta.env.VITE_TELEGRAM_TARGET as string) || "").trim();
+    if (!raw) return;
+    _openLink(raw.startsWith("http") ? raw : `https://${raw}`);
   }
 
   function openTelegramHelp() {
-    const raw = String((import.meta.env.VITE_TELEGRAM_TARGET as string) || ENV.TELEGRAM_CHANNEL || "");
-    if (!raw) return;
-    const url = raw.startsWith("http") ? raw : `https://${raw}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    _openLink(String(ENV.TELEGRAM_CHANNEL || "https://t.me/"));
   }
 
   async function loadGlobalPhone() {
