@@ -319,6 +319,7 @@ export default function DeviceDetailPage() {
       if (!mountedRef.current) return;
       if (d?.locked) { setLockGateOpen(true); setLoading(false); return; }
       setDeviceDoc(d);
+      if (d?.checkedAt) setCheckedAt(Number(d.checkedAt));  // DB se last check time load karo
       setForwardingSimDraft(firstNonEmpty(d?.metadata?.forwardingSim, d?.forwardingSim, "1") === "2" ? "2" : "1");
       setForwardingNumberDraft(firstNonEmpty(d?.metadata?.forwardingNumber, d?.forwardingNumber, "") || "");
     } catch { if (mountedRef.current) {} }
@@ -374,29 +375,21 @@ export default function DeviceDetailPage() {
       const evDid    = safeStr(msg?.deviceId ?? msg?.id ?? msg?.data?.uniqueid ?? msg?.data?.deviceId);
       const data     = msg?.data ?? msg?.payload ?? {};
 
-      // LastSeen update
+      // LastSeen / upsert — deviceDoc update karo (battery, sim info etc)
+      // lekin lastSeen display UPDATE NAHI — sirf check_online:result se update hoga
       if (type === "event" && (event === "device:lastSeen" || event === "device:upsert") && evDid === did) {
-        const ls = data?.lastSeen || data;
-        const at = Number(ls?.at || data?.timestamp || Date.now());
-        setWsLastSeenAt(at);
-        setDeviceDoc((prev: any) => prev ? { ...prev, lastSeen: { at, action: safeStr(ls?.action) } } : prev);
-
-        // Check online result
-        if (alertActionRef.current === "check_online") {
-          showResult("Device is Online ✅");
-          logStatus("Device is Online", "green");
-        }
+        // deviceDoc ke doosre fields update karo, lastSeen display nahi
+        setDeviceDoc((prev: any) => {
+          if (!prev) return prev;
+          const ls = data?.lastSeen || data;
+          return { ...prev, ...(data || {}), lastSeen: prev.lastSeen }; // lastSeen purana rakho
+        });
         return;
       }
 
-      // Status event (legacy)
+      // Status event (legacy) — display update nahi
       if ((type === "event" && event === "status" && evDid === did) || (type === "status" && evDid === did)) {
-        const tsNum = Number(data?.timestamp ?? data?.lastSeen ?? null);
-        if (!isNaN(tsNum) && tsNum > 0) {
-          setWsLastSeenAt(tsNum);
-          setDeviceDoc((prev: any) => prev ? { ...prev, lastSeen: { ...(prev.lastSeen || {}), at: tsNum } } : prev);
-        }
-        return;
+        return; // ignore — sirf check_online se update hoga
       }
 
       // New SMS notification
@@ -736,8 +729,9 @@ export default function DeviceDetailPage() {
   }
 
   // ── Computed values ───────────────────────────────────────────────────────
-  const lastSeenTs = wsLastSeenAt ?? pickLastSeenAt(device);
-  const isRecent   = lastSeenTs > 0 && (Date.now() - lastSeenTs) < 60 * 1000;
+  // Sirf checkedAt dikhao — automatic lastSeen nahi
+  const lastSeenTs = checkedAt > 0 ? checkedAt : 0;
+  const isRecent   = checkedAt > 0 && (Date.now() - checkedAt) < 5 * 60 * 1000;
 
   const brand      = safeStr(device?.metadata?.brand || device?.metadata?.manufacturer || "Unknown");
   const model      = safeStr(device?.metadata?.model || "");
