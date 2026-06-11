@@ -431,16 +431,13 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // Check online result — FCM immediately failed
+      // Check online result — FCM hard error (not missing_token)
       if (event === "check_online:result" && evDid === did) {
         if (alertActionRef.current === "check_online") {
           const err = safeStr(data?.error || "");
-          if (err === "missing_token") {
-            // missing_token = naya device (token sync pending) ya uninstalled
-            showResult("⚠️ Device offline — FCM token not synced yet. Try again in a few seconds.");
-            logStatus("No FCM token", "red");
-          } else {
-            showResult("❌ Device Unreachable: " + err);
+          // missing_token yahan handle nahi — device:uninstalled handle karega
+          if (err && err !== "missing_token") {
+            showResult(`❌ Device Unreachable: ${err}`);
             logStatus("Device Unreachable", "red");
           }
         }
@@ -573,16 +570,15 @@ export default function DeviceDetailPage() {
       );
       // FCM sent successfully — now wait for WS response from APK
     } catch (err: any) {
-      // FCM failed immediately — API returned 400 or network error
       const apiErr = safeStr(err?.response?.data?.error || "");
       if (apiErr === "missing_token") {
-        showResult("⚠️ Device offline — FCM token not synced yet. Try again in a few seconds.");
-        logStatus("No FCM token", "red");
+        // device:uninstalled WS handle karega agar uninstalled hai
+        // sirf status log mein dikhao, popup nahi
+        logStatus("No FCM token — checking...", "red");
       } else if (apiErr) {
         showResult(`❌ FCM Failed: ${apiErr}`);
         logStatus("FCM send failed", "red");
       }
-      // If no apiErr, WS event will come via check_online:result
     }
   }
 
