@@ -396,6 +396,15 @@ export default function MainPage() {
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     return ((location.state as any)?.tab as TabKey) || "home";
   });
+
+  // Auto-open Settings if redirected from LoginPage (default PIN warning)
+  useEffect(() => {
+    if ((location.state as any)?.openSettings) {
+      setHelpScreen("settings");
+      loadGlobalPhone();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [dark,       setDark]       = useState(false);
   const [search,     setSearch]     = useState("");
   const [sortMode,   setSortMode]   = useState<SortMode>("new");
