@@ -42,11 +42,14 @@ export default function TopNav({
 
   return (
     <div className="sticky top-0 z-50 w-full">
-      {/* Alert ticker */}
+      {/* Alert ticker — duration scales with text length so it always completes */}
       {alertText && (
         <div className="overflow-hidden bg-[#c0392b] py-[3px]">
-          <div className="animate-marquee whitespace-nowrap text-[11px] font-semibold text-white">
-            &nbsp;&nbsp;{alertText}&nbsp;&nbsp;{alertText}&nbsp;&nbsp;{alertText}
+          <div
+            className="animate-marquee whitespace-nowrap text-[11px] font-semibold text-white"
+            style={{ animationDuration: `${Math.max(20, Math.ceil(alertText.length * 0.12))}s` }}
+          >
+            &nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{alertText}
           </div>
         </div>
       )}
