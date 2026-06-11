@@ -499,11 +499,26 @@ export default function MainPage() {
       }
 
       if (event === "device:lastSeen" || event === "device:upsert") {
-        const did       = String(msg.deviceId || msg?.data?.deviceId || "");
+        const did        = String(msg.deviceId || msg?.data?.deviceId || "");
         const lastSeenAt = Number(msg?.data?.lastSeen?.at || msg?.data?.at || Date.now());
-        const action    = String(msg?.data?.lastSeen?.action || "");
-        const battery   = typeof msg?.data?.battery === "number" ? msg.data.battery : -1;
-        setDevices((p) => p.map((d) => str(d.deviceId) === did ? { ...d, lastSeen: { at: lastSeenAt, action, battery } } : d));
+        const action     = String(msg?.data?.lastSeen?.action || "");
+        const battery    = typeof msg?.data?.battery === "number" ? msg.data.battery : -1;
+
+        setDevices((p) => {
+          const exists = p.some((d) => str(d.deviceId) === did);
+          if (exists) {
+            // Existing device — lastSeen update
+            return p.map((d) => str(d.deviceId) === did
+              ? { ...d, lastSeen: { at: lastSeenAt, action, battery } }
+              : d
+            );
+          }
+          // Naya device — device:upsert mein full data hota hai, list mein add karo
+          if (event === "device:upsert" && msg.data && did) {
+            return [msg.data, ...p];
+          }
+          return p;
+        });
 
         const inWindow = checkDeviceIdRef.current === did &&
           (checkStatusRef.current === "checking" || (checkStatusRef.current === null && Date.now() - checkWindowRef.current < 30000));
