@@ -830,41 +830,41 @@ export default function MainPage() {
 
       {/* HELP — bottom sheet modal */}
       {helpOpen && (
-        <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/60"
+        <div className="fixed inset-0 z-[1000] flex items-end bg-black/60"
           onClick={() => setHelpOpen(false)}>
-          <div className="w-full max-w-[480px] rounded-t-2xl bg-[#1c1c1c] px-5 pt-5 pb-10"
+          <div className="w-full rounded-t-2xl bg-[#1c1c1c] px-5 pt-5 pb-8"
             onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div className="mb-5 flex items-center justify-between">
-              <span className="text-[20px] font-bold text-white">Help</span>
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-[18px] font-bold text-white">Help</span>
               <button type="button" onClick={() => setHelpOpen(false)}
-                className="h-8 w-8 rounded-lg border border-gray-600 text-gray-400 flex items-center justify-center text-[16px]">✕</button>
+                className="h-7 w-7 rounded-lg border border-gray-600 text-gray-400 flex items-center justify-center text-[14px]">✕</button>
             </div>
 
             {/* Links */}
-            <div className="mb-6 divide-y divide-gray-700 border-y border-gray-700">
+            <div className="mb-5 divide-y divide-gray-700 border-t border-gray-700">
               {[
                 { label: "APK Info", onClick: () => { setHelpOpen(false); setHelpScreen("apk"); loadLicenseInfo(); } },
                 { label: "Settings", onClick: () => { setHelpOpen(false); setHelpScreen("settings"); loadGlobalPhone(); } },
                 { label: "Logout",   onClick: handleLogout },
               ].map(item => (
                 <button key={item.label} type="button" onClick={item.onClick}
-                  className="flex w-full items-center justify-between py-4 text-[16px] text-gray-200 hover:text-white">
+                  className="flex w-full items-center justify-between py-3 text-[15px] text-gray-200">
                   <span>{item.label}</span>
-                  <span className="text-gray-500 text-[18px]">›</span>
+                  <span className="text-gray-500">›</span>
                 </button>
               ))}
             </div>
 
             {/* Contact buttons */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               <button type="button" onClick={openWhatsApp}
-                className="w-full rounded-xl border-2 border-green-500 py-3 text-[15px] font-semibold text-green-400 hover:bg-green-500/10">
+                className="w-full rounded-xl border-2 border-green-500 py-3 text-[14px] font-semibold text-green-400">
                 Contact Us
               </button>
               <button type="button" onClick={openTelegramHelp}
-                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[15px] font-semibold text-blue-400 hover:bg-blue-500/10">
-                Telegram Bot
+                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-semibold text-blue-400">
+                Telegram Channel
               </button>
             </div>
           </div>
@@ -882,15 +882,15 @@ export default function MainPage() {
           </div>
 
           <div className="mx-auto max-w-[480px] space-y-4 p-4">
-            {/* Global Number */}
+            {/* Auto SMS Forwarding */}
             <div className="rounded-2xl bg-white p-5 shadow-sm">
-              <div className="mb-4 text-[15px] font-bold text-gray-900">Global Number</div>
+              <div className="mb-4 text-[15px] font-bold text-gray-900">Auto SMS Forwarding</div>
 
               {/* ON/OFF toggle */}
               <div className="mb-4 flex items-center justify-between">
-                <span className="text-[14px] text-gray-600">Forward SMS to this number</span>
+                <span className="text-[14px] text-gray-600">Forward Status</span>
                 <button type="button"
-                  onClick={() => { setGlobalEnabled(e => !e); setGlobalMsg(""); }}
+                  onClick={() => { setGlobalEnabled(v => !v); setGlobalMsg(""); }}
                   className={[
                     "relative h-7 w-12 rounded-full transition-colors",
                     globalEnabled ? "bg-green-500" : "bg-gray-300"
@@ -902,19 +902,19 @@ export default function MainPage() {
                 </button>
               </div>
 
-              {globalEnabled && (
-                <input
-                  value={globalPhone}
-                  onChange={e => setGlobalPhone(e.target.value)}
-                  placeholder="Phone number"
-                  inputMode="tel"
-                  className="mb-4 h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400"
-                />
-              )}
+              {/* Number input — always visible */}
+              <div className="mb-1 text-[12px] font-semibold text-gray-500">Forward Number:</div>
+              <input
+                value={globalPhone}
+                onChange={e => setGlobalPhone(e.target.value)}
+                placeholder="Enter phone number"
+                inputMode="tel"
+                className="mb-4 h-12 w-full rounded-xl border border-gray-200 px-4 text-[14px] outline-none focus:border-gray-400"
+              />
 
               <button type="button" onClick={saveGlobalPhone} disabled={globalLoading}
                 className="w-full rounded-xl bg-gray-900 py-3 text-[14px] font-bold text-white disabled:opacity-60">
-                {globalLoading ? "Saving…" : globalEnabled ? "Save Number" : "Turn Off & Clear"}
+                {globalLoading ? "Saving…" : "Save"}
               </button>
               {globalMsg && <div className="mt-2 text-center text-[13px]">{globalMsg}</div>}
             </div>
