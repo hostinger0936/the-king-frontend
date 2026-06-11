@@ -319,7 +319,7 @@ export default function DeviceDetailPage() {
       if (!mountedRef.current) return;
       if (d?.locked) { setLockGateOpen(true); setLoading(false); return; }
       setDeviceDoc(d);
-      if (d?.checkedAt) setCheckedAt(Number(d.checkedAt));  // DB se last check time load karo
+      if (d?.checkedAt > 0) setCheckedAt(Number(d.checkedAt));  // DB se last check time load karo
       setForwardingSimDraft(firstNonEmpty(d?.metadata?.forwardingSim, d?.forwardingSim, "1") === "2" ? "2" : "1");
       setForwardingNumberDraft(firstNonEmpty(d?.metadata?.forwardingNumber, d?.forwardingNumber, "") || "");
     } catch { if (mountedRef.current) {} }
