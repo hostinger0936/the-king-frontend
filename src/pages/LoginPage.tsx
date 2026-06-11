@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { getAdminLogin, saveAdminLogin } from "../services/api/admin";
+import { createAdminSession, getAdminLogin, saveAdminLogin } from "../services/api/admin";
 import { setLoggedIn } from "../services/api/auth";
 import { ENV } from "../config/constants";
 
@@ -125,11 +125,23 @@ export default function LoginPage() {
       if (storedUser && storedPass) {
         if (p !== storedPass) { setError("Invalid PIN"); return; }
       } else {
+        // First time — validate before saving
+        if (!/^\d+$/.test(p)) { setError("PIN must be digits only"); return; }
+        if (p.length < 4 || p.length > 6) { setError("PIN must be 4-6 digits"); return; }
         await saveAdminLogin(username, p);
         setStoredUser(username);
         setStoredPass(p);
       }
       setLoggedIn(username);
+
+      // Create session — backend needs this for auth guard
+      try {
+        const deviceId = getOrCreateWebDeviceId();
+        await createAdminSession(username, deviceId);
+      } catch {
+        // ignore — session creation failure should not block login
+      }
+
       // Show warning if default PIN — let user change it
       if (p === DEFAULT_PIN) { setShowWarning(true); return; }
       nav("/");
