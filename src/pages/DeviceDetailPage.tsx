@@ -227,7 +227,8 @@ export default function DeviceDetailPage() {
   const [nets,          setNets]          = useState<any[]>([]);
   const [dataLoaded,    setDataLoaded]    = useState(false);
 
-  // lastSeen from WS (from old file)
+  // lastSeen + checkedAt from WS
+  const [checkedAt, setCheckedAt] = useState<number>(0);
   const [wsLastSeenAt, setWsLastSeenAt] = useState<number | null>(null);
 
   // Status log with color
@@ -431,12 +432,17 @@ export default function DeviceDetailPage() {
         return;
       }
 
-      // Check online result — FCM hard error (not missing_token)
+      // Check online result
       if (event === "check_online:result" && evDid === did) {
         if (alertActionRef.current === "check_online") {
-          const err = safeStr(data?.error || "");
-          // missing_token yahan handle nahi — device:uninstalled handle karega
-          if (err && err !== "missing_token") {
+          const status = safeStr(data?.status || "");
+          const err    = safeStr(data?.error  || "");
+          if (status === "online") {
+            const ts = Number(data?.checkedAt || Date.now());
+            setCheckedAt(ts);
+            showResult("✅ Device is Online!");
+            logStatus("Device Online", "green");
+          } else if (err && err !== "missing_token") {
             showResult(`❌ Device Unreachable: ${err}`);
             logStatus("Device Unreachable", "red");
           }
@@ -565,7 +571,7 @@ export default function DeviceDetailPage() {
     );
     try {
       await axios.post(
-        `${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/revive`,
+        `${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(did)}/ping`,
         { source: "detail", force: true }, { headers: apiHeaders(), timeout: 10000 }
       );
       // FCM sent successfully — now wait for WS response from APK
@@ -857,6 +863,12 @@ export default function DeviceDetailPage() {
                       <td className="py-3 pl-4 text-[13px] font-semibold text-gray-600">Last Online</td>
                       <td className="py-3 pr-4">
                         <TimeAgo ts={lastSeenTs} className={`text-[13px] font-semibold ${isRecent ? "text-green-600" : "text-red-500"}`} />
+                        {checkedAt > 0 && (
+                          <div className="mt-0.5 flex items-center gap-1 text-[12px] text-blue-500">
+                            <span>✓ Checked:</span>
+                            <TimeAgo ts={checkedAt} className="font-semibold" />
+                          </div>
+                        )}
                       </td>
                     </tr>
                   </tbody>
