@@ -775,9 +775,6 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* Safety: if activeTab=help without modal, force open it */}
-      {activeTab === "help" && !helpOpen && (() => { setTimeout(() => { setHelpOpen(true); setActiveTab("home"); }, 0); return null; })()}
-
       {/* HELP — bottom sheet modal */}
       {helpOpen && (
         <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/60"
