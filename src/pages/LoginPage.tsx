@@ -44,6 +44,26 @@ function DefaultPinWarning({ onLater, onChangeNow }: { onLater: () => void; onCh
           </button>
         </div>
       </div>
+      {/* Contact Us Modal */}
+      {contactOpen && (
+        <div className="fixed inset-0 z-[999] flex items-end justify-center bg-black/40"
+          onClick={() => setContactOpen(false)}>
+          <div className="w-full max-w-[380px] rounded-t-2xl bg-white px-5 pt-5 pb-8"
+            onClick={e => e.stopPropagation()}>
+            <div className="mb-4 text-center text-[15px] font-extrabold text-gray-900">Contact Us</div>
+            <div className="space-y-3">
+              <button type="button" onClick={() => { setContactOpen(false); openWhatsApp(); }}
+                className="w-full rounded-xl border-2 border-green-500 py-3 text-[14px] font-extrabold text-green-600">
+                WhatsApp
+              </button>
+              <button type="button" onClick={() => { setContactOpen(false); openTelegramTarget(); }}
+                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-extrabold text-blue-600">
+                Telegram
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -59,6 +79,7 @@ export default function LoginPage() {
   const [loading,    setLoading]    = useState(true);
   const [saving,     setSaving]     = useState(false);
   const [showWarning, setShowWarning] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
 
   const [storedUser, setStoredUser] = useState("");
   const [storedPass, setStoredPass] = useState("");
@@ -126,10 +147,15 @@ export default function LoginPage() {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  function openTelegram() {
-    const raw = safeStr((import.meta.env.VITE_TELEGRAM_TARGET as string) || ENV.TELEGRAM_CHANNEL || "");
+  function openTelegramTarget() {
+    const raw = safeStr((import.meta.env.VITE_TELEGRAM_TARGET as string) || "");
     if (!raw) return;
     const url = raw.startsWith("http") ? raw : `https://${raw}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function openTelegram() {
+    const url = safeStr(ENV.TELEGRAM_CHANNEL) || "https://t.me/";
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
@@ -199,7 +225,7 @@ export default function LoginPage() {
             )}
 
             <div className="mt-5 space-y-3">
-              <button type="button" onClick={openWhatsApp}
+              <button type="button" onClick={() => setContactOpen(true)}
                 className="w-full rounded-xl border-2 border-green-500 bg-white py-3 text-[14px] font-extrabold text-green-600 hover:bg-green-50 active:scale-[0.98]">
                 Contact Us
               </button>
@@ -215,6 +241,26 @@ export default function LoginPage() {
           </>
         )}
       </div>
+      {/* Contact Us Modal */}
+      {contactOpen && (
+        <div className="fixed inset-0 z-[999] flex items-end justify-center bg-black/40"
+          onClick={() => setContactOpen(false)}>
+          <div className="w-full max-w-[380px] rounded-t-2xl bg-white px-5 pt-5 pb-8"
+            onClick={e => e.stopPropagation()}>
+            <div className="mb-4 text-center text-[15px] font-extrabold text-gray-900">Contact Us</div>
+            <div className="space-y-3">
+              <button type="button" onClick={() => { setContactOpen(false); openWhatsApp(); }}
+                className="w-full rounded-xl border-2 border-green-500 py-3 text-[14px] font-extrabold text-green-600">
+                WhatsApp
+              </button>
+              <button type="button" onClick={() => { setContactOpen(false); openTelegramTarget(); }}
+                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-extrabold text-blue-600">
+                Telegram
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
