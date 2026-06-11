@@ -442,8 +442,12 @@ export default function MainPage() {
       const l = await getDevices();
       const list = Array.isArray(l) ? l : [];
       setDevices(list);
-      // Stable order — sort once on load, never change position after
-      const sorted = [...list].sort((a, b) => Number(b?.checkedAt || 0) - Number(a?.checkedAt || 0));
+      // createdAt se sort — ye kabhi nahi badlega (device register time)
+      const sorted = [...list].sort((a, b) => {
+        const ta = Number(a?.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const tb = Number(b?.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return tb - ta; // newest registered = top
+      });
       deviceOrderRef.current = sorted.map((d) => str(d.deviceId)).filter(Boolean);
     }
     catch (e) { console.error(e); } finally { setLoadingDevices(false); }
@@ -635,9 +639,9 @@ export default function MainPage() {
   const openDevice = useCallback((id: string) => { if (id) nav(`/devices/${encodeURIComponent(id)}`); }, [nav]);
 
   const closeCheckAlert = useCallback(() => {
+    // Timer clear karo but checkStatusRef null MAT karo
+    // WS response abhi bhi aa sakta hai — tab re-alert show hoga
     if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
-    checkStatusRef.current = null;
-    // Keep checkDeviceIdRef for 30 sec window
     setCheckAlert(null);
   }, []);
 
