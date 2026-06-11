@@ -56,7 +56,7 @@ export default function TopNav({
               className="whitespace-nowrap text-[11px] font-semibold text-white"
               style={{
                 display: "inline-block",
-                animation: `ticker-scroll ${Math.max(20, Math.ceil(alertText.length * 0.14))}s linear infinite`,
+                animation: `ticker-scroll ${Math.max(15, Math.ceil(alertText.length * 0.09))}s linear infinite`,
               }}
             >
               &nbsp;&nbsp;&nbsp;{alertText}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{alertText}
