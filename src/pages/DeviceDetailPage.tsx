@@ -88,14 +88,23 @@ function TimeAgo({ ts, className = "" }: { ts: number; className?: string }) {
   return <span className={className}>{text}</span>;
 }
 
-// ─── CopyBtn ──────────────────────────────────────────────────────────────────
+// ─── CopyBtn — SVG icon (emoji renders as black square on Android) ────────────
 function CopyBtn({ value }: { value: string }) {
   const [ok, setOk] = useState(false);
   return (
     <button type="button"
-      onClick={() => { copyText(value); setOk(true); setTimeout(() => setOk(false), 1000); }}
-      className="ml-1 shrink-0 text-[12px] opacity-50 hover:opacity-100">
-      {ok ? "✅" : "📋"}
+      onClick={() => { copyText(value); setOk(true); setTimeout(() => setOk(false), 1200); }}
+      className="ml-1.5 shrink-0 flex items-center justify-center opacity-40 hover:opacity-90 active:opacity-100">
+      {ok ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+      )}
     </button>
   );
 }
