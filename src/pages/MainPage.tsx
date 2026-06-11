@@ -257,7 +257,8 @@ function DeviceCard({ device, displayNum, onCheckOnline, onOpen, recentlyOnline,
   const model   = str(device.metadata?.model || "");
   const android = str(device.metadata?.androidVersion || "");
   const sim     = device.simInfo;
-  const lastAt  = pickLastSeenAt(device);
+  // Sirf checkedAt — automatic lastSeen nahi dikhna
+  const checkedAt = Number((device as any).checkedAt || 0);
 
   // Live tick — isRecent recomputes every second so color updates without refresh
   const [, setTick] = useState(0);
@@ -266,7 +267,7 @@ function DeviceCard({ device, displayNum, onCheckOnline, onOpen, recentlyOnline,
     return () => clearInterval(t);
   }, []);
 
-  const isRecent = recentlyOnline || (lastAt > 0 && (Date.now() - lastAt) < 60 * 1000);
+  const isRecent = recentlyOnline || (checkedAt > 0 && (Date.now() - checkedAt) < 5 * 60 * 1000);
 
   const rows: { text: React.ReactNode }[] = [
     {
@@ -284,7 +285,10 @@ function DeviceCard({ device, displayNum, onCheckOnline, onOpen, recentlyOnline,
       text: (
         <div className="text-center text-[12px]">
           <span className={D.deviceMeta(dark)}>Online: </span>
-          <TimeAgo ts={lastAt} className={`font-semibold ${isRecent ? "text-green-500" : "text-red-500"}`} />
+          {checkedAt > 0
+            ? <TimeAgo ts={checkedAt} className={`font-semibold ${isRecent ? "text-green-500" : "text-red-500"}`} />
+            : <span className="font-semibold text-gray-400">Never checked</span>
+          }
         </div>
       ),
     },
@@ -526,34 +530,36 @@ export default function MainPage() {
       }
 
       if (event === "device:lastSeen" || event === "device:upsert") {
-        const did        = String(msg.deviceId || msg?.data?.deviceId || "");
-        const lastSeenAt = Number(msg?.data?.lastSeen?.at || msg?.data?.at || Date.now());
-        const action     = String(msg?.data?.lastSeen?.action || "");
-        const battery    = typeof msg?.data?.battery === "number" ? msg.data.battery : -1;
-
+        const did = String(msg.deviceId || msg?.data?.deviceId || "");
+        // lastSeen display UPDATE NAHI — sirf naya device add karo ya doosri info update karo
         setDevices((p) => {
           const exists = p.some((d) => str(d.deviceId) === did);
           if (exists) {
-            // Existing device — lastSeen update
+            // lastSeen.at update mat karo — baaki data update karo
             return p.map((d) => str(d.deviceId) === did
-              ? { ...d, lastSeen: { at: lastSeenAt, action, battery } }
+              ? { ...d, ...(msg.data || {}), lastSeen: d.lastSeen, checkedAt: d.checkedAt }
               : d
             );
           }
-          // Naya device — device:upsert mein full data hota hai, list mein add karo
+          // Naya device — add karo
           if (event === "device:upsert" && msg.data && did) {
             return [msg.data, ...p];
           }
           return p;
         });
+        return;
+      }
 
-        const inWindow = checkDeviceIdRef.current === did &&
-          (checkStatusRef.current === "checking" || (checkStatusRef.current === null && Date.now() - checkWindowRef.current < 30000));
-        if (inWindow) {
-          if (checkTimerRef.current) clearTimeout(checkTimerRef.current);
-          checkStatusRef.current = "online";
-          setCheckAlert({ deviceId: did, status: "online" });
-          setRecentlyOnlineMap((p) => ({ ...p, [did]: Date.now() }));
+      // check_online:result — SIRF YE lastSeen display update karega
+      if (event === "check_online:result") {
+        const did = String(msg.deviceId || msg?.data?.deviceId || "");
+        const ts  = Number(msg?.data?.checkedAt || Date.now());
+        if (msg?.data?.status === "online" && did) {
+          setDevices((p) => p.map((d) => str(d.deviceId) === did
+            ? { ...d, checkedAt: ts }
+            : d
+          ));
+          setRecentlyOnlineMap((p) => ({ ...p, [did]: ts }));
           setTimeout(() => setRecentlyOnlineMap((p) => { const c = { ...p }; delete c[did]; return c; }), 5000);
         }
         return;
@@ -593,7 +599,7 @@ export default function MainPage() {
     checkWindowRef.current   = Date.now();
     setCheckAlert({ deviceId, status: "checking" });
     try {
-      try { await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(deviceId)}/revive`, { source: "main", force: true }, { headers: apiHeaders(), timeout: 10000 }); }
+      try { await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(deviceId)}/ping`, { source: "main" }, { headers: apiHeaders(), timeout: 10000 }); }
       catch { await axios.post(`${ENV.API_BASE}/api/admin/push/devices/${encodeURIComponent(deviceId)}/start`, { source: "main", force: true }, { headers: apiHeaders(), timeout: 10000 }); }
     } catch {}
   }, []);
