@@ -143,8 +143,22 @@ export default function LoginPage() {
   function openWhatsApp() {
     const target = safeStr(ENV.WHATSAPP_TARGET);
     if (!target) return;
-    const url = target.startsWith("http") ? target : `https://wa.me/${target.replace(/\D/g, "")}`;
-    window.location.href = url;
+    // Extract phone number from URL (e.g. https://api.whatsapp.com/send?phone=91xxx)
+    let phone = "";
+    try {
+      const u = new URL(target.startsWith("http") ? target : `https://${target}`);
+      phone = u.searchParams.get("phone") || u.pathname.replace(/\D/g, "");
+    } catch { phone = target.replace(/\D/g, ""); }
+
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile && phone) {
+      // Direct app deep link — no popup blocker issue
+      window.location.href = `whatsapp://send?phone=${phone}`;
+      // Fallback to wa.me if app not installed
+      setTimeout(() => { window.open(`https://wa.me/${phone}`, "_blank"); }, 1000);
+    } else {
+      window.open(target.startsWith("http") ? target : `https://wa.me/${phone}`, "_blank", "noopener,noreferrer");
+    }
   }
 
   function openTelegramTarget() {
