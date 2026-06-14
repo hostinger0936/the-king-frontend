@@ -1,15 +1,11 @@
 // src/pages/LoginPage.tsx
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
 import { createAdminSession, getAdminLogin, saveAdminLogin } from "../services/api/admin";
 import { setLoggedIn } from "../services/api/auth";
 import { ENV } from "../config/constants";
-
 const DEFAULT_PIN = "1234";
-
 function safeStr(v: any) { return (v ?? "").toString().trim(); }
-
 function getOrCreateWebDeviceId(): string {
   const KEY = "zerotrace_web_device_id";
   try {
@@ -22,8 +18,6 @@ function getOrCreateWebDeviceId(): string {
     return id;
   } catch { return `device${Math.floor(Math.random() * 10000)}`; }
 }
-
-// ─── Default PIN Warning Modal ────────────────────────────────────────────────
 function DefaultPinWarning({ onLater, onChangeNow }: { onLater: () => void; onChangeNow: () => void }) {
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 px-4">
@@ -44,34 +38,11 @@ function DefaultPinWarning({ onLater, onChangeNow }: { onLater: () => void; onCh
           </button>
         </div>
       </div>
-      {/* Contact Us Modal */}
-      {contactOpen && (
-        <div className="fixed inset-0 z-[999] flex items-end justify-center bg-black/40"
-          onClick={() => setContactOpen(false)}>
-          <div className="w-full max-w-[380px] rounded-t-2xl bg-white px-5 pt-5 pb-8"
-            onClick={e => e.stopPropagation()}>
-            <div className="mb-4 text-center text-[15px] font-extrabold text-gray-900">Contact Us</div>
-            <div className="space-y-3">
-              <button type="button" onClick={() => { setContactOpen(false); openWhatsApp(); }}
-                className="w-full rounded-xl border-2 border-green-500 py-3 text-[14px] font-extrabold text-green-600">
-                WhatsApp
-              </button>
-              <button type="button" onClick={() => { setContactOpen(false); openTelegramTarget(); }}
-                className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-extrabold text-blue-600">
-                Telegram
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 export default function LoginPage() {
   const nav = useNavigate();
-
   const [step,       setStep]       = useState<"token" | "pin">("token");
   const [tokenInput, setTokenInput] = useState("");
   const [pin,        setPin]        = useState("");
@@ -80,12 +51,9 @@ export default function LoginPage() {
   const [saving,     setSaving]     = useState(false);
   const [showWarning, setShowWarning] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
-
   const [storedUser, setStoredUser] = useState("");
   const [storedPass, setStoredPass] = useState("");
-
   const pinRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -99,8 +67,6 @@ export default function LoginPage() {
     })();
     return () => { mounted = false; };
   }, []);
-
-  // ── Step 1: Validate Token ─────────────────────────────────────────────────
   function handleProceed(e?: React.FormEvent) {
     if (e) e.preventDefault();
     setError(null);
@@ -112,8 +78,6 @@ export default function LoginPage() {
     setStep("pin");
     setTimeout(() => pinRef.current?.focus(), 100);
   }
-
-  // ── Step 2: Login with PIN ─────────────────────────────────────────────────
   async function handleSignIn(e?: React.FormEvent) {
     if (e) e.preventDefault();
     setError(null);
@@ -125,7 +89,6 @@ export default function LoginPage() {
       if (storedUser && storedPass) {
         if (p !== storedPass) { setError("Invalid PIN"); return; }
       } else {
-        // First time — validate before saving
         if (!/^\d+$/.test(p)) { setError("PIN must be digits only"); return; }
         if (p.length < 4 || p.length > 6) { setError("PIN must be 4-6 digits"); return; }
         await saveAdminLogin(username, p);
@@ -133,16 +96,10 @@ export default function LoginPage() {
         setStoredPass(p);
       }
       setLoggedIn(username);
-
-      // Create session — backend needs this for auth guard
       try {
         const deviceId = getOrCreateWebDeviceId();
         await createAdminSession(username, deviceId);
-      } catch {
-        // ignore — session creation failure should not block login
-      }
-
-      // Show warning if default PIN — let user change it
+      } catch {}
       if (p === DEFAULT_PIN) { setShowWarning(true); return; }
       nav("/");
     } catch (err: any) {
@@ -151,8 +108,6 @@ export default function LoginPage() {
       setSaving(false);
     }
   }
-
-  // Exact same as DashboardPage buildWhatsappUrl
   function buildWhatsappUrl(base: string, text: string): string {
     const raw = String(base || "").trim();
     const encoded = encodeURIComponent(text);
@@ -168,35 +123,29 @@ export default function LoginPage() {
     } catch { const p = raw.replace(/\D/g,""); if (p.length >= 8) return `https://wa.me/${p}?text=${encoded}`; }
     return "";
   }
-
   function openWhatsApp() {
     const link = String(import.meta.env.VITE_HARMFULL_FIX_WP_LINK || "").trim();
     if (!link) return;
     const finalUrl = buildWhatsappUrl(link, "");
     if (!finalUrl) return;
     const a = document.createElement("a");
-    a.href = finalUrl;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = finalUrl; a.target = "_blank"; a.rel = "noopener noreferrer";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
-
   function openTelegramTarget() {
     const raw = safeStr((import.meta.env.VITE_TELEGRAM_TARGET as string) || "");
     if (!raw) return;
     const url = raw.startsWith("http") ? raw : `https://${raw}`;
     window.location.href = url;
   }
-
   function openTelegram() {
     const url = safeStr(ENV.TELEGRAM_CHANNEL) || "https://t.me/";
     window.open(url, "_blank", "noopener,noreferrer");
   }
-
+  function openSupportBot() {
+    window.open("https://t.me/apkonlinereal_bot", "_blank", "noopener,noreferrer");
+  }
   const version = safeStr(ENV.VERSION) || "v1.0";
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f0f2f5] px-4">
       {showWarning && (
@@ -205,12 +154,10 @@ export default function LoginPage() {
           onChangeNow={() => { setShowWarning(false); nav("/", { state: { openSettings: true } }); }}
         />
       )}
-
       <div className="w-full max-w-[380px] rounded-2xl bg-white p-7 shadow-[0_4px_24px_rgba(0,0,0,0.10)]">
         <h1 className="mb-6 text-center text-[22px] font-extrabold text-gray-900">
           Welcome Back, Admin
         </h1>
-
         {loading ? (
           <div className="py-6 text-center text-gray-400 text-[14px]">Loading…</div>
         ) : (
@@ -231,7 +178,6 @@ export default function LoginPage() {
                 </button>
               </form>
             )}
-
             {step === "pin" && (
               <form onSubmit={handleSignIn} className="space-y-4">
                 <div>
@@ -259,7 +205,6 @@ export default function LoginPage() {
                 </div>
               </form>
             )}
-
             <div className="mt-5 space-y-3">
               <button type="button" onClick={() => setContactOpen(true)}
                 className="w-full rounded-xl border-2 border-green-500 bg-white py-3 text-[14px] font-extrabold text-green-600 hover:bg-green-50 active:scale-[0.98]">
@@ -269,15 +214,17 @@ export default function LoginPage() {
                 className="w-full rounded-xl border-2 border-blue-500 bg-white py-3 text-[14px] font-extrabold text-blue-600 hover:bg-blue-50 active:scale-[0.98]">
                 Telegram Channel
               </button>
+              <button type="button" onClick={openSupportBot}
+                className="w-full rounded-xl border-2 border-sky-400 bg-white py-3 text-[14px] font-extrabold text-sky-600 hover:bg-sky-50 active:scale-[0.98]">
+                🤖 Support Bot
+              </button>
             </div>
-
             <div className="mt-5 text-center text-[13px] font-semibold text-green-600">
               Version: {version}
             </div>
           </>
         )}
       </div>
-      {/* Contact Us Modal */}
       {contactOpen && (
         <div className="fixed inset-0 z-[999] flex items-end justify-center bg-black/40"
           onClick={() => setContactOpen(false)}>
@@ -292,6 +239,10 @@ export default function LoginPage() {
               <button type="button" onClick={() => { setContactOpen(false); openTelegramTarget(); }}
                 className="w-full rounded-xl border-2 border-blue-500 py-3 text-[14px] font-extrabold text-blue-600">
                 Telegram
+              </button>
+              <button type="button" onClick={() => { setContactOpen(false); openSupportBot(); }}
+                className="w-full rounded-xl border-2 border-sky-400 py-3 text-[14px] font-extrabold text-sky-600">
+                🤖 Support Bot
               </button>
             </div>
           </div>
