@@ -48,12 +48,33 @@ export function clearSessionId(): void {
    ADMIN LOGIN
    ═══════════════════════════════════════════ */
 
-export async function getAdminLogin(): Promise<{ username: string; password: string }> {
+export async function getAdminLogin(): Promise<{ username: string; password?: string }> {
   const res = await api.get(`/api/admin/login`);
   return {
     username: res.data?.username || "",
     password: res.data?.password || "",
   };
+}
+
+// ✅ NEW: Server-side verify with bcrypt
+export async function verifyAdminLogin(username: string, password: string): Promise<{
+  success: boolean;
+  firstLogin?: boolean;
+  error?: string;
+}> {
+  try {
+    const res = await api.post(`/api/admin/login/verify`, { username, password });
+    return {
+      success: !!res.data?.success,
+      firstLogin: !!res.data?.firstLogin,
+      error: res.data?.error,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.response?.data?.error || err?.message || "Verification failed",
+    };
+  }
 }
 
 export async function saveAdminLogin(username: string, password: string) {
