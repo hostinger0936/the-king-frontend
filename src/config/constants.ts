@@ -1,5 +1,5 @@
 /**
- * config/constants.ts — FULL & FINAL
+ * config/constants.ts — FULL & FINAL (FIXED)
  */
 
 export const STORAGE_KEYS = {
@@ -27,9 +27,10 @@ export const ENV = {
   VERSION:          (import.meta.env.VITE_VERSION           as string) || "v1.0",
 };
 
+// ✅ FIXED: Accept "changeme" from environment
 export function getApiKey(): string {
   const envKey = ENV.API_KEY || "";
-  if (envKey && envKey !== "changeme") return envKey;
+  if (envKey) return envKey;  // ✅ Accept everything, including "changeme"
   try { return localStorage.getItem(STORAGE_KEYS.API_KEY) || ""; } catch { return ""; }
 }
 
