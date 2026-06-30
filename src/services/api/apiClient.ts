@@ -8,15 +8,12 @@ function getOrCreateWebDeviceId(): string {
   try {
     const existing = localStorage.getItem(KEY);
     if (existing && existing.trim()) return existing.trim();
-
     const counterKey = "zerotrace_web_device_counter";
     const nRaw = localStorage.getItem(counterKey);
     const n = Math.max(1, Number(nRaw || "1") || 1);
     const id = `device${n}`;
-
     localStorage.setItem(KEY, id);
     localStorage.setItem(counterKey, String(n + 1));
-
     return id;
   } catch {
     return `device${Math.floor(Math.random() * 10000)}`;
@@ -83,10 +80,11 @@ function createClient(): AxiosInstance {
         const code =
           data && (data.error || data.code) ? String(data.error || data.code) : "";
 
+        // ✅ FIX: Sirf session_expired aur unauthenticated pe logout karo
+        // "unauthorized" hataya — notifications 401 se logout nahi hoga
         const isSessionExpired =
           status === 401 &&
           (code === "session_expired" ||
-            code === "unauthorized" ||
             code === "unauthenticated");
 
         if (isSessionExpired) {
